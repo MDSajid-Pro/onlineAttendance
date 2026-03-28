@@ -46,7 +46,7 @@ const AdminLayout = () => {
           </h1>
         </div>
         
-        <nav className="space-y-2 flex-1 sm:pt-12">
+        <nav className="space-y-2 flex-1 md:pt-12">
           <NavItem to="/" icon={<LayoutGrid size={20}/>} label="Overview" active={location.pathname === '/'} onClick={closeMenu} />
           <NavItem to="/students" icon={<Users size={20}/>} label="Students" active={location.pathname === '/students'} onClick={closeMenu} />
           <NavItem to="/attendance" icon={<CheckCircle size={20}/>} label="Attendance" active={location.pathname === '/attendance'} onClick={closeMenu} />

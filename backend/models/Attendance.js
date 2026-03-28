@@ -2,11 +2,23 @@ import mongoose from 'mongoose';
 
 const attendanceSchema = new mongoose.Schema({
   date: { 
-    type: String, // Storing as YYYY-MM-DD for easier filtering
+    type: String, // YYYY-MM-DD
     required: true 
   },
   course: { type: String, required: true },
   semester: { type: String, required: true },
+  
+  // --- NEW FIELDS ---
+  isHoliday: { 
+    type: Boolean, 
+    default: false 
+  },
+  holidayReason: { 
+    type: String, 
+    default: "" 
+  },
+  // ------------------
+
   records: [
     {
       studentId: { 
@@ -26,7 +38,7 @@ const attendanceSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// Prevent multiple attendance records for the same course/semester on the same day
+// Index to prevent duplicate entries for the same day/course
 attendanceSchema.index({ date: 1, course: 1, semester: 1 }, { unique: true });
 
 export default mongoose.model('Attendance', attendanceSchema);
