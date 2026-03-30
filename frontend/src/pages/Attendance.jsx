@@ -55,17 +55,6 @@ const Attendance = () => {
     fetchAttendanceData();
   }, [course, semester, selectedDate, axios, token]);
 
-  // --- AUTO-DETECT SUNDAY ---
-  useEffect(() => {
-    const day = new Date(selectedDate).getUTCDay();
-    if (day === 0) { 
-      setIsHoliday(true);
-      setHolidayReason("Sunday");
-    } else {
-      setIsHoliday(false);
-      setHolidayReason("");
-    }
-  }, [selectedDate]);
 
   const toggleStatus = (id, status) => {
     if(isHoliday) return;
@@ -101,64 +90,84 @@ const Attendance = () => {
     const studentsData = res.data;
     if (!studentsData || studentsData.length === 0) return alert("No data found.");
 
+    // We assume your backend returns a 'holidays' object or array in the response
+    // e.g., res.data.holidays = { "2024-03-15": "Holi", "2024-03-29": "Good Friday" }
+    const monthlyHolidays = res.data.holidays || {}; 
+
     const daysInMonth = new Date(year, month, 0).getDate();
-    const doc = new jsPDF('landscape'); // Landscape is necessary for 31 columns
+    const doc = new jsPDF('landscape'); 
+    const monthName = new Date(year, month - 1).toLocaleString('en-US', { month: 'long' });
 
-    // --- PDF Header Section ---
-    doc.setFontSize(18);
-    doc.text(`Monthly Attendance Report`, 14, 15);
-    doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Course: ${course} | Semester: ${semester} | Date: ${month}/${year}`, 14, 22);
+    // --- Header ---
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(20, 33, 61);
+    doc.text("SUCCESS DEGREE COLLEGE", 148, 15, { align: "center" });
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Monthly Attendance Report | ${course} | Sem: ${semester} | ${monthName} ${year}`, 148, 22, { align: "center" });
+    doc.line(14, 26, 283, 26);
 
-    // --- Prepare Table Headers ---
+    // --- Table Data ---
     const tableHeaders = ["Roll", "Name", ...Array.from({length: daysInMonth}, (_, i) => (i + 1).toString()), "Total"];
-
-    // --- Prepare Table Body ---
     const tableRows = studentsData.map(s => {
       const row = [s.registerNo, s.fullName];
-      
       for (let i = 1; i <= daysInMonth; i++) {
-        const dayKey = `${year}-${month.padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-        const status = s.attendance[dayKey];
-        row.push(status === 'present' ? 'P' : status === 'absent' ? 'A' : '-');
+        const dateKey = `${year}-${month.padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
+        const dayOfWeek = new Date(year, month - 1, i).getDay();
+        
+        if (dayOfWeek === 0) {
+          row.push('SUN');
+        } else if (monthlyHolidays[dateKey]) {
+          row.push('HOL'); // Marked as holiday in backend
+        } else {
+          const status = s.attendance[dateKey];
+          row.push(status === 'present' ? 'P' : status === 'absent' ? 'A' : '-');
+        }
       }
-
       row.push(s.totalPresent);
       return row;
     });
 
-    // --- Generate Table with Styling ---
     autoTable(doc, {
-      startY: 30,
+      startY: 32,
       head: [tableHeaders],
       body: tableRows,
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 1, halign: 'center' }, // Smaller font to fit 31 days
-      headStyles: { fillStyle: [79, 70, 229], textColor: 255, fontStyle: 'bold' }, // Indigo header
-      columnStyles: {
-        1: { halign: 'left', cellWidth: 30 }, // Name column wider and left-aligned
-      },
+      styles: { fontSize: 6.5, cellPadding: 0.5, halign: 'center' },
+      headStyles: { fillColor: [20, 33, 61] },
       didParseCell: (data) => {
-        // Apply conditional coloring for P and A
-        if (data.section === 'body' && data.column.index > 1 && data.column.index <= (daysInMonth + 1)) {
-          if (data.cell.text[0] === 'P') {
-            data.cell.styles.textColor = [0, 128, 0]; // Green
-            data.cell.styles.fontStyle = 'bold';
-          } else if (data.cell.text[0] === 'A') {
-            data.cell.styles.textColor = [200, 0, 0]; // Red
-            data.cell.styles.fontStyle = 'bold';
-          }
+        if (data.section === 'body') {
+          const val = data.cell.text[0];
+          if (val === 'SUN') data.cell.styles.fillColor = [255, 235, 235];
+          if (val === 'HOL') data.cell.styles.fillColor = [235, 255, 235];
         }
       }
     });
 
-    // --- Download PDF ---
-    doc.save(`Attendance_${course}_${semester}_${month}_${year}.pdf`);
+    // --- DYNAMIC HOLIDAY REASONS DISPLAY ---
+    let currentY = doc.lastAutoTable.finalY + 10;
+    const holidayEntries = Object.entries(monthlyHolidays);
 
+    if (holidayEntries.length > 0) {
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.text("Holiday Details:", 14, currentY);
+      currentY += 5;
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      
+      holidayEntries.forEach(([date, reason]) => {
+        const formattedDate = new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        doc.text(`• ${formattedDate}: ${reason}`, 14, currentY);
+        currentY += 5;
+      });
+    }
+
+    doc.save(`Attendance_${course}_${monthName}_${year}.pdf`);
   } catch (error) {
-    console.error("PDF Export Error:", error);
-    alert("Failed to generate PDF report.");
+    console.error("PDF Error:", error);
   }
 };
 
