@@ -1,10 +1,10 @@
 // src/components/AddStudentModal.jsx
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
 
-const AddStudentModal = ({ isOpen, onClose, onRefresh }) => {
+const AddStudentModal = ({ isOpen, onClose, onRefresh, initialData }) => {
   const [formData, setFormData] = useState({ 
     fullName: '', 
     registerNo: '', 
@@ -13,6 +13,21 @@ const AddStudentModal = ({ isOpen, onClose, onRefresh }) => {
   });
   const [loading, setLoading] = useState(false);
 
+  // Populate form when initialData (the student to edit) is passed
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        fullName: initialData.fullName,
+        registerNo: initialData.registerNo,
+        course: initialData.course,
+        semester: initialData.semester
+      });
+    } else {
+      // Clear form if we are adding a new student
+      setFormData({ fullName: "", registerNo: "", course: "B.Sc", semester: "1st Semester" });
+    }
+  }, [initialData, isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e) => {
@@ -20,18 +35,19 @@ const AddStudentModal = ({ isOpen, onClose, onRefresh }) => {
     setLoading(true);
 
     try {
-      // POST to your backend (Axios uses the baseURL from your context)
-      await axios.post('/api/students/add', formData);
-      
-      toast.success("Student added successfully!");
-      onRefresh(); // Call this function to reload the student list in the background
+      if (initialData) {
+        // EDIT LOGIC
+        await axios.put(`/api/students/update/${initialData._id}`, formData);
+        toast.success("Student updated successfully");
+      } else {
+        // ADD LOGIC
+        await axios.post("/api/students/add", formData);
+        toast.success("Student added successfully");
+      }
+      onRefresh(); // Refresh the list in Dashboard
       onClose();   // Close modal
-      setFormData({ fullName: '', registerNo: '', semester: '1st Semester', course: 'B.Sc' });
-    } catch (error) {
-      console.error("Error adding student:", error);
-      toast.error(error.response?.data?.message || "Failed to add student");
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Operation failed");
     }
   };
 

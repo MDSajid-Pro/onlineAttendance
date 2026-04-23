@@ -64,50 +64,78 @@ router.get('/report/monthly', async (req, res) => {
   try {
     const { month, year, course, semester } = req.query;
 
-    // 1. Create a prefix for the regex: e.g., "2024-03"
-    // Ensuring month is 2 digits (e.g., '3' becomes '03')
-    const monthPadding = month.padStart(2, '0');
-    const datePrefix = `${year}-${monthPadding}`;
+    // 1. Fetch all students for this course/semester
+    const students = await Student.find({ course, semester }).sort({ registerNo: 1 });
 
-    // 2. Fetch all students for this course/sem to ensure every student appears in the Excel
-    const students = await Student.find({ course, semester });
-
-    // 3. Fetch all attendance records for that month using Regex
-    const monthlyAttendance = await Attendance.find({
+    // 2. Fetch all attendance records for that month (including holidays)
+    // Matches dates like "2026-04-01" to "2026-04-31"
+    const attendanceRecords = await Attendance.find({
       course,
       semester,
-      date: { $regex: new RegExp(`^${datePrefix}`) }
+      date: { $regex: `^${year}-${month.padStart(2, '0')}` }
     });
 
-    // 4. Pivot the data into a grid format
-    const report = students.map(student => {
-      const dailyStatus = {};
-      let presentCount = 0;
+    const holidayMap = {};
+    const reportData = students.map(student => {
+      const studentAttendance = {};
+      let totalPresent = 0;
 
-      monthlyAttendance.forEach(dayDoc => {
-        // In your schema, the array is called 'records'
-        const studentEntry = dayDoc.records.find(
-          r => r.studentId.toString() === student._id.toString()
-        );
+      attendanceRecords.forEach(rec => {
+        // Build the holiday map for the frontend PDF
+        if (rec.isHoliday) {
+          holidayMap[rec.date] = rec.holidayReason || "Holiday";
+        }
 
-        if (studentEntry) {
-          dailyStatus[dayDoc.date] = studentEntry.status; // 'present' or 'absent'
-          if (studentEntry.status === 'present') presentCount++;
+        // Map individual student status
+        const record = rec.records.find(r => r.studentId.toString() === student._id.toString());
+        if (record) {
+          studentAttendance[rec.date] = record.status;
+          if (record.status === 'present') totalPresent++;
         }
       });
 
       return {
-        registerNo: student.registerNo,
+        _id: student._id,
         fullName: student.fullName,
-        attendance: dailyStatus, // e.g. {"2024-03-01": "present"}
-        totalPresent: presentCount
+        registerNo: student.registerNo,
+        attendance: studentAttendance,
+        totalPresent
       };
     });
 
-    res.json(report);
+    // Send both students and the holiday details
+    res.status(200).json({ 
+      students: reportData, 
+      holidays: holidayMap 
+    });
+    
   } catch (error) {
-    console.error("Report Error:", error);
-    res.status(500).json({ error: "Server crashed while generating report" });
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// PUT: Update student details by ID
+router.put('/update/:id', async (req, res) => {
+  try {
+    const { fullName, registerNo, course, semester } = req.body;
+    
+    const updatedStudent = await Student.findByIdAndUpdate(
+      req.params.id,
+      { fullName, registerNo, course, semester },
+      { new: true, runValidators: true } // Returns the modified document
+    );
+
+    if (!updatedStudent) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    res.status(200).json(updatedStudent);
+  } catch (error) {
+    // Handle duplicate register numbers
+    if (error.code === 11000) {
+      return res.status(400).json({ message: "Register Number already exists" });
+    }
+    res.status(500).json({ message: error.message });
   }
 });
 

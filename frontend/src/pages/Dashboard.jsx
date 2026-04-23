@@ -190,7 +190,13 @@ const Dashboard = () => {
         </div>
       </main>
 
-      <AddStudentModal isOpen={isModalOpen} onClose={handleCloseModal} onRefresh={fetchStudents} initialData={editingStudent} />
+      <AddStudentModal 
+  key={editingStudent?._id || 'new'} // Force reset when editing target changes
+  isOpen={isModalOpen} 
+  onClose={handleCloseModal} 
+  onRefresh={fetchStudents} 
+  initialData={editingStudent} 
+/>
     </div>
   );
 };
