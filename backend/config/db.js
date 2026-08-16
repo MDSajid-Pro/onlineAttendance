@@ -1,9 +1,22 @@
 import mongoose from "mongoose";
+import dns from "dns";
+
+// Prevent cloud DNS lookup timeouts on Vercel
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
+
+let cached = global.mongoose;
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null, indexesCleaned: false };
+}
 
 const cleanLegacyIndexes = async () => {
   try {
+    const db = mongoose.connection.db;
+    if (!db) return;
+
     // 1. Clean 'assignments' collection
-    const assignmentCollection = mongoose.connection.collection('assignments');
+    const assignmentCollection = db.collection('assignments');
     const assignmentIndexes = await assignmentCollection.indexes();
     if (assignmentIndexes.some(idx => idx.name === 'teacher_1_subject_1_courseName_1')) {
       await assignmentCollection.dropIndex('teacher_1_subject_1_courseName_1');
@@ -11,7 +24,7 @@ const cleanLegacyIndexes = async () => {
     }
 
     // 2. Clean 'attendances' collection
-    const attendanceCollection = mongoose.connection.collection('attendances');
+    const attendanceCollection = db.collection('attendances');
     const attendanceIndexes = await attendanceCollection.indexes();
     if (attendanceIndexes.some(idx => idx.name === 'date_1_course_1_semester_1')) {
       await attendanceCollection.dropIndex('date_1_course_1_semester_1');
@@ -23,14 +36,44 @@ const cleanLegacyIndexes = async () => {
 };
 
 const connectDB = async () => {
-  try {
-    await mongoose.connect(`${process.env.MONGODB_URI}/online-attendence`);
-    console.log("Database Connected .....");
-    await cleanLegacyIndexes();
-  } catch (error) {
-    console.error("Database connection error:", error.message);
-    process.exit(1);
+  // If a connection is already alive in this serverless instance, reuse it immediately
+  if (cached.conn) {
+    return cached.conn;
   }
+
+  if (!cached.promise) {
+    const opts = {
+      bufferCommands: false,
+    };
+
+    cached.promise = mongoose
+      .connect(`${process.env.MONGODB_URI}/online-attendence`, opts)
+      .then(async (mongooseInstance) => {
+        console.log("Database Connected .....");
+
+        // Clean indexes only once per container startup
+        if (!cached.indexesCleaned) {
+          await cleanLegacyIndexes();
+          cached.indexesCleaned = true;
+        }
+
+        return mongooseInstance;
+      })
+      .catch((error) => {
+        console.error("Database connection error:", error.message);
+        cached.promise = null;
+        throw error; // Throw to express error handler instead of process.exit(1)
+      });
+  }
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (e) {
+    cached.promise = null;
+    throw e;
+  }
+
+  return cached.conn;
 };
 
 export default connectDB;
