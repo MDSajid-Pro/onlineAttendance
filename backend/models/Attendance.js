@@ -1,44 +1,58 @@
+// backend/models/Attendance.js
 import mongoose from 'mongoose';
 
-const attendanceSchema = new mongoose.Schema({
-  date: { 
-    type: String, // YYYY-MM-DD
-    required: true 
-  },
-  course: { type: String, required: true },
-  semester: { type: String, required: true },
-  
-  // --- NEW FIELDS ---
-  isHoliday: { 
-    type: Boolean, 
-    default: false 
-  },
-  holidayReason: { 
-    type: String, 
-    default: "" 
-  },
-  // ------------------
-
-  records: [
-    {
-      studentId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'Student', 
-        required: true 
-      },
-      fullName: String,
-      registerNo: String,
-      status: { 
-        type: String, 
-        enum: ['present', 'absent'], 
-        required: true 
-      }
+const attendanceRecordSchema = new mongoose.Schema(
+  {
+    student: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Student',
+      required: true
+    },
+    status: {
+      type: String,
+      enum: ['Present', 'Absent', 'Late'],
+      default: 'Present'
     }
-  ],
-  createdAt: { type: Date, default: Date.now }
-});
+  },
+  { _id: false }
+);
 
-// Index to prevent duplicate entries for the same day/course
-attendanceSchema.index({ date: 1, course: 1, semester: 1 }, { unique: true });
+const attendanceSchema = new mongoose.Schema(
+  {
+    teacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    assignment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Assignment',
+      required: true
+    },
+    courseName: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    subject: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    date: {
+      type: String,
+      required: true
+    },
+    records: [attendanceRecordSchema]
+  },
+  { 
+    timestamps: true,
+    strict: true 
+  }
+);
 
-export default mongoose.model('Attendance', attendanceSchema);
+// Prevent duplicate attendance for the same assignment on the same date
+attendanceSchema.index({ assignment: 1, date: 1 }, { unique: true });
+
+// Prevent Mongoose model recompilation errors
+export default mongoose.models.Attendance || mongoose.model('Attendance', attendanceSchema);

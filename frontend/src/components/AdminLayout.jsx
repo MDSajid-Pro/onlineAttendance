@@ -47,25 +47,18 @@ const AdminLayout = () => {
         </div>
         
         <nav className="space-y-2 flex-1 md:pt-12">
-          <NavItem to="/" icon={<LayoutGrid size={20}/>} label="Overview" active={location.pathname === '/'} onClick={closeMenu} />
-          <NavItem to="/students" icon={<Users size={20}/>} label="Students" active={location.pathname === '/students'} onClick={closeMenu} />
-          <NavItem to="/attendance" icon={<CheckCircle size={20}/>} label="Attendance" active={location.pathname === '/attendance'} onClick={closeMenu} />
+          <NavItem to="/admin" icon={<LayoutGrid size={20}/>} label="Overview" active={location.pathname === '/admin'} onClick={closeMenu} />
+          <NavItem to="/admin/add" icon={<Users size={20}/>} label="Add Employee" active={location.pathname === '/admin/add'} onClick={closeMenu} />
+          <NavItem to="/admin/students" icon={<CheckCircle size={20} />} label="Student List" active={location.pathname === '/admin/students'} onClick={closeMenu} />
+          <NavItem to="/admin/assign" icon={<CheckCircle size={20}/>} label="Student Allocation" active={location.pathname === '/admin/assign'} onClick={closeMenu} />
         </nav>
 
         {/* --- BOTTOM SECTION (Profile & Logout) --- */}
         <div className="mt-auto space-y-4">
           <div className="p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl">
-            <p className="text-xs text-indigo-300 font-medium uppercase tracking-wider">Teacher Mode</p>
-            <p className="text-sm text-white font-semibold">Prof. Md Sajid</p>
+            <p className="text-xs text-indigo-300 font-medium uppercase tracking-wider">Admin Mode</p>
+            <p className="text-sm text-white font-semibold">Admin</p>
           </div>
-
-          <button 
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-all cursor-pointer group"
-          >
-            <LogOut size={20} className="group-hover:translate-x-1 transition-transform" />
-            <span className="font-semibold text-sm uppercase tracking-widest">Logout</span>
-          </button>
         </div>
       </aside>
 

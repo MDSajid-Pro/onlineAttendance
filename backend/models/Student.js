@@ -1,19 +1,32 @@
+// models/Student.js
 import mongoose from 'mongoose';
 
-const studentSchema = new mongoose.Schema({
-  fullName: { type: String, required: true, trim: true },
-  registerNo: { type: String, required: true, unique: true },
-  semester: { 
-    type: String, 
-    required: true, 
-    enum: ['1st Semester', '2nd Semester', '3rd Semester', '4th Semester', '5th Semester', '6th Semester'] 
+const studentSchema = new mongoose.Schema(
+  {
+    fullName: {
+      type: String,
+      required: [true, 'Student full name is required'],
+      trim: true
+    },
+    registerNo: {
+      type: String,
+      required: [true, 'Register number is required'],
+      unique: true,
+      trim: true,
+      uppercase: true
+    },
+    course: {
+      type: String,
+      required: [true, 'Course is required'],
+      trim: true
+    },
+    semester: {
+      type: String,
+      required: [true, 'Semester is required'],
+      trim: true
+    }
   },
-  course: { 
-    type: String, 
-    required: true, 
-    enum: ['B.Sc', 'BCA', 'B.Com', 'B.A'] 
-  },
-  enrollmentDate: { type: Date, default: Date.now }
-});
+  { timestamps: true }
+);
 
-export default mongoose.model('Student', studentSchema);
+export default mongoose.models.Student || mongoose.model('Student', studentSchema);
