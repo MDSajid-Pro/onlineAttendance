@@ -1,8 +1,4 @@
 import mongoose from "mongoose";
-import dns from "dns";
-
-// Prevent cloud DNS lookup timeouts on Vercel
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 let cached = global.mongoose;
 
@@ -36,22 +32,23 @@ const cleanLegacyIndexes = async () => {
 };
 
 const connectDB = async () => {
-  // If a connection is already alive in this serverless instance, reuse it immediately
   if (cached.conn) {
     return cached.conn;
   }
 
   if (!cached.promise) {
-    const opts = {
-      bufferCommands: false,
-    };
+    // Enable Mongoose command buffering so queries wait for connection to complete
+    mongoose.set('bufferCommands', true);
+
+    const mongoUri = process.env.MONGODB_URI.includes('online-attendence')
+      ? process.env.MONGODB_URI
+      : `${process.env.MONGODB_URI}/online-attendence`;
 
     cached.promise = mongoose
-      .connect(`${process.env.MONGODB_URI}/online-attendence`, opts)
+      .connect(mongoUri)
       .then(async (mongooseInstance) => {
         console.log("Database Connected .....");
 
-        // Clean indexes only once per container startup
         if (!cached.indexesCleaned) {
           await cleanLegacyIndexes();
           cached.indexesCleaned = true;
@@ -62,7 +59,7 @@ const connectDB = async () => {
       .catch((error) => {
         console.error("Database connection error:", error.message);
         cached.promise = null;
-        throw error; // Throw to express error handler instead of process.exit(1)
+        throw error;
       });
   }
 
