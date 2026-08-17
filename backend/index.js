@@ -7,6 +7,7 @@ import authRoutes from "./routes/authRoutes.js";
 import teacherRoutes from "./routes/assignmentRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
+import adminRouter from "./routes/adminRoute.js";
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ app.get("/", (req, res) => res.status(200).send("API is running"));
 
 // 3. API Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRouter);
 app.use("/api/teacher", teacherRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/attendance", attendanceRoutes);
