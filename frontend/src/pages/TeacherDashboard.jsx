@@ -23,15 +23,17 @@ import {
   Download,
   Palmtree,
   FileSpreadsheet,
-  FileText
+  FileText,
+  MessageSquareShare,
+  PhoneCall
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Holiday master list (Format: MM-DD or YYYY-MM-DD)
+// Holiday master list (Format: MM-DD)
 const FIXED_HOLIDAYS = {
-  '01-01': 'New Year\'s Day',
+  '01-01': "New Year's Day",
   '01-14': 'Makara Sankranti',
   '01-26': 'Republic Day',
   '05-01': 'May Day / Labour Day',
@@ -52,7 +54,7 @@ const TeacherDashboard = () => {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
   
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
-  const [attendanceRecords, setAttendanceRecords] = useState({});
+  const [attendanceRecords, setAttendanceRecords] = useState({}); // { [studentId]: 'Present' | 'Absent' | 'Late' | null }
   const [isSavedForDate, setIsSavedForDate] = useState(false);
   const [isDateLoading, setIsDateLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -76,7 +78,7 @@ const TeacherDashboard = () => {
       return { isHoliday: true, reason: 'Sunday (Weekly Institutional Off)' };
     }
 
-    // Check fixed holidays
+    // Check fixed calendar holidays
     const mmdd = `${month}-${day}`;
     if (FIXED_HOLIDAYS[mmdd]) {
       return { isHoliday: true, reason: FIXED_HOLIDAYS[mmdd] };
@@ -85,7 +87,7 @@ const TeacherDashboard = () => {
     return { isHoliday: false, reason: null };
   }, [attendanceDate]);
 
-  // 2. Fetch Assignments
+  // 2. Fetch Teacher Assigned Classes
   useEffect(() => {
     const fetchTeacherClasses = async () => {
       if (!teacherId) return;
@@ -169,7 +171,7 @@ const TeacherDashboard = () => {
         });
         setIsSavedForDate(true);
       } else {
-        // Initial state: Unselected (null) so buttons are NOT highlighted by default
+        // Initial state: Set students to null (unmarked & disabled initially)
         activeAssignment.students?.forEach(st => {
           initialMap[st._id] = null;
         });
@@ -247,7 +249,25 @@ const TeacherDashboard = () => {
       updated[st._id] = status;
     });
     setAttendanceRecords(updated);
-    toast.success(`Marked all as ${status}`);
+    toast.success(`Marked all students as ${status}`);
+  };
+
+  // WhatsApp Alert Notice Generator for Absent Student
+  const handleSendWhatsAppAlert = (student) => {
+    const studentName = student.fullName || student.name || 'Student';
+    const regNo = student.registerNo || student.rollNumber || 'N/A';
+    const subjectName = activeAssignment?.subject || 'Class Subject';
+    const phone = (student.parentPhone || student.phone || '').replace(/\D/g, '');
+
+    const messageText = `Dear Parent, your ward *${studentName}* (Reg No: *${regNo}*) was marked *ABSENT* for *${subjectName}* on *${attendanceDate}* at *Success Degree College*. Please contact the department office for any clarifications.`;
+
+    const formattedPhone = phone.length === 10 ? `91${phone}` : phone;
+
+    const url = formattedPhone 
+      ? `https://wa.me/${formattedPhone}?text=${encodeURIComponent(messageText)}`
+      : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
+
+    window.open(url, '_blank');
   };
 
   const handleLogout = () => {
@@ -262,7 +282,7 @@ const TeacherDashboard = () => {
   const handleSubmitAttendance = async () => {
     if (!activeAssignment) return;
     if (holidayInfo?.isHoliday) {
-      return toast.error("Attendance submission disabled on institutional holidays.");
+      return toast.error("Attendance submission is disabled on institutional holidays.");
     }
     if (!isAllMarked) {
       return toast.error(`Please mark attendance for all students (${uncompletedCount} remaining)`);
@@ -293,101 +313,96 @@ const TeacherDashboard = () => {
     }
   };
 
-  // 4. Monthly Attendance PDF Report Generator
-const downloadMonthlyReportPDF = async () => {
-  if (!activeAssignment) return;
-  setGeneratingReport(true);
-  try {
-    const [year, month] = attendanceDate.split('-');
-    const { data } = await axios.get('/api/attendance/monthly-report', {
-      params: {
-        assignmentId: activeAssignment._id,
-        month,
-        year
-      }
-    });
-
-    const logs = data.logs || [];
-    if (logs.length === 0) {
-      toast.error(`No attendance logs recorded for ${month}/${year}`);
-      return;
-    }
-
-    // Aggregate attendance totals per student
-    const studentMap = {};
-    activeAssignment.students?.forEach(st => {
-      studentMap[st._id] = {
-        name: st.fullName || st.name,
-        regNo: st.registerNo || 'N/A',
-        present: 0,
-        absent: 0,
-        late: 0,
-        totalSessions: logs.length
-      };
-    });
-
-    logs.forEach(log => {
-      log.records?.forEach(rec => {
-        const stId = typeof rec.student === 'object' ? rec.student?._id : rec.student;
-        if (studentMap[stId]) {
-          if (rec.status === 'Present') studentMap[stId].present++;
-          else if (rec.status === 'Absent') studentMap[stId].absent++;
-          else if (rec.status === 'Late') studentMap[stId].late++;
+  // Monthly Attendance PDF Generator
+  const downloadMonthlyReportPDF = async () => {
+    if (!activeAssignment) return;
+    setGeneratingReport(true);
+    try {
+      const [year, month] = attendanceDate.split('-');
+      const { data } = await axios.get('/api/attendance/monthly-report', {
+        params: {
+          assignmentId: activeAssignment._id,
+          month,
+          year
         }
       });
-    });
 
-    // Initialize jsPDF
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const monthName = new Date(Number(year), Number(month) - 1).toLocaleString('default', { month: 'long' });
+      const logs = data.logs || [];
+      if (logs.length === 0) {
+        toast.error(`No attendance logs recorded for ${month}/${year}`);
+        return;
+      }
 
-    // Header Details
-    doc.setFontSize(18);
-    doc.setTextColor(20, 24, 33);
-    doc.text("Success Degree College", 14, 18);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(80, 90, 110);
-    doc.text(`Monthly Attendance Report — ${monthName} ${year}`, 14, 25);
-    doc.text(`Course: ${activeAssignment.courseName} | Semester: ${activeAssignment.semester} | Subject: ${activeAssignment.subject}`, 14, 31);
-    doc.text(`Faculty: ${storedUser?.name || 'Faculty Member'}`, 14, 37);
+      const studentMap = {};
+      activeAssignment.students?.forEach(st => {
+        studentMap[st._id] = {
+          name: st.fullName || st.name,
+          regNo: st.registerNo || 'N/A',
+          present: 0,
+          absent: 0,
+          late: 0,
+          totalSessions: logs.length
+        };
+      });
 
-    // Table Data Structure
-    const tableHeaders = [["#", "Register No", "Student Name", "Present", "Absent", "Late", "Attendance %"]];
-    const tableRows = Object.values(studentMap).map((st, idx) => {
-      const percentage = Math.round(((st.present + st.late * 0.5) / (st.totalSessions || 1)) * 100);
-      return [
-        idx + 1,
-        st.regNo,
-        st.name,
-        st.present,
-        st.absent,
-        st.late,
-        `${percentage}%`
-      ];
-    });
+      logs.forEach(log => {
+        log.records?.forEach(rec => {
+          const stId = typeof rec.student === 'object' ? rec.student?._id : rec.student;
+          if (studentMap[stId]) {
+            if (rec.status === 'Present') studentMap[stId].present++;
+            else if (rec.status === 'Absent') studentMap[stId].absent++;
+            else if (rec.status === 'Late') studentMap[stId].late++;
+          }
+        });
+      });
 
-    // Call autoTable as a standalone function passing 'doc'
-    autoTable(doc, {
-      startY: 42,
-      head: tableHeaders,
-      body: tableRows,
-      theme: 'striped',
-      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
-      styles: { fontSize: 9, cellPadding: 3 }
-    });
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const monthName = new Date(Number(year), Number(month) - 1).toLocaleString('default', { month: 'long' });
 
-    doc.save(`Attendance_${activeAssignment.subject}_${monthName}_${year}.pdf`);
-    toast.success("Monthly PDF Report downloaded!");
-  } catch (err) {
-    console.error("PDF generation error:", err);
-    toast.error("Failed to generate report: " + (err.message || "Unknown error"));
-  } finally {
-    setGeneratingReport(false);
-  }
-};
+      doc.setFontSize(18);
+      doc.setTextColor(20, 24, 33);
+      doc.text("Success Degree College", 14, 18);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(80, 90, 110);
+      doc.text(`Monthly Attendance Report — ${monthName} ${year}`, 14, 25);
+      doc.text(`Course: ${activeAssignment.courseName} | Semester: ${activeAssignment.semester} | Subject: ${activeAssignment.subject}`, 14, 31);
+      doc.text(`Faculty: ${storedUser?.name || 'Faculty Member'} | Total Sessions: ${logs.length}`, 14, 37);
 
-  // 5. Monthly CSV / Excel Export
+      const tableHeaders = [["#", "Register No", "Student Name", "Present", "Absent", "Late", "Attendance %"]];
+      const tableRows = Object.values(studentMap).map((st, idx) => {
+        const percentage = Math.round(((st.present + st.late * 0.5) / (st.totalSessions || 1)) * 100);
+        return [
+          idx + 1,
+          st.regNo,
+          st.name,
+          st.present,
+          st.absent,
+          st.late,
+          `${percentage}%`
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 42,
+        head: tableHeaders,
+        body: tableRows,
+        theme: 'striped',
+        headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 9, cellPadding: 3 }
+      });
+
+      doc.save(`Attendance_${activeAssignment.subject}_${monthName}_${year}.pdf`);
+      toast.success("Monthly PDF Report downloaded!");
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      toast.error("Failed to generate report: " + (err.message || "Unknown error"));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  // Monthly CSV / Excel Export
   const downloadMonthlyReportCSV = async () => {
     if (!activeAssignment) return;
     try {
@@ -448,11 +463,11 @@ const downloadMonthlyReportPDF = async () => {
       <div className="w-full max-w-7xl space-y-6">
 
         {/* Navigation Header */}
-        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-5 md:p-6 rounded-[2rem] shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-5 md:p-6 rounded-4xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
           <div className="flex items-center gap-4 relative z-10">
-            <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 flex items-center justify-center shadow-lg shadow-indigo-500/25 text-white border border-white/20">
+            <div className="w-13 h-13 rounded-2xl bg-linear-to-br from-indigo-500 via-indigo-600 to-violet-700 flex items-center justify-center shadow-lg shadow-indigo-500/25 text-white border border-white/20">
               <GraduationCap size={26} />
             </div>
             <div>
@@ -485,7 +500,7 @@ const downloadMonthlyReportPDF = async () => {
               />
             </div>
 
-            {/* Monthly Report Trigger Buttons */}
+            {/* Monthly Report Buttons */}
             <button
               onClick={downloadMonthlyReportPDF}
               disabled={generatingReport || !activeAssignment}
@@ -532,7 +547,7 @@ const downloadMonthlyReportPDF = async () => {
         )}
 
         {/* Course & Semester Filter Canvas */}
-        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-[2rem] p-6 space-y-6 shadow-xl relative overflow-hidden">
+        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 space-y-6 shadow-xl relative overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/5">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -565,7 +580,7 @@ const downloadMonthlyReportPDF = async () => {
                         onClick={() => setSelectedCourse(course)}
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
                           isSelected
-                            ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-500/60 shadow-lg shadow-indigo-500/20 ring-1 ring-white/20'
+                            ? 'bg-linear-to-r from-indigo-600 to-violet-600 text-white border-indigo-500/60 shadow-lg shadow-indigo-500/20 ring-1 ring-white/20'
                             : 'bg-slate-950/60 border-white/5 text-slate-400 hover:text-white hover:border-white/15'
                         }`}
                       >
@@ -595,7 +610,7 @@ const downloadMonthlyReportPDF = async () => {
                         onClick={() => setSelectedSemester(sem)}
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
                           isSelected
-                            ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-500/60 shadow-lg shadow-indigo-500/20 ring-1 ring-white/20'
+                            ? 'bg-linear-to-r from-indigo-600 to-violet-600 text-white border-indigo-500/60 shadow-lg shadow-indigo-500/20 ring-1 ring-white/20'
                             : 'bg-slate-950/60 border-white/5 text-slate-400 hover:text-white hover:border-white/15'
                         }`}
                       >
@@ -676,7 +691,7 @@ const downloadMonthlyReportPDF = async () => {
 
         {/* Main Roll Call Station */}
         {activeAssignment ? (
-          <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-[2rem] p-6 md:p-8 space-y-6 shadow-2xl">
+          <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 md:p-8 space-y-6 shadow-2xl">
             
             {/* Header with Stats Counter & Status */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10">
@@ -788,7 +803,7 @@ const downloadMonthlyReportPDF = async () => {
 
             </div>
 
-            {/* Student Roll Call Matrix Table */}
+            {/* Student Roll Call Table */}
             {isDateLoading ? (
               <div className="p-16 text-center text-slate-400 text-sm flex items-center justify-center gap-3">
                 <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
@@ -802,16 +817,16 @@ const downloadMonthlyReportPDF = async () => {
                   </div>
                 ) : (
                   filteredStudents.map(student => {
-                    const currentStatus = attendanceRecords[student._id]; // null initially on new dates
+                    const currentStatus = attendanceRecords[student._id];
 
                     return (
                       <div 
                         key={student._id} 
-                        className="p-4 sm:px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors"
+                        className="p-4 sm:px-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 hover:bg-white/2 transition-colors"
                       >
-                        {/* Student ID Info */}
+                        {/* Student Details */}
                         <div className="flex items-center gap-3.5">
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-indigo-400 shadow-sm text-sm">
+                          <div className="w-10 h-10 rounded-xl bg-linear-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-indigo-400 shadow-sm text-sm">
                             {(student.fullName || student.name || 'S').charAt(0).toUpperCase()}
                           </div>
                           <div>
@@ -825,52 +840,73 @@ const downloadMonthlyReportPDF = async () => {
                                 </span>
                               )}
                             </div>
-                            <p className="font-mono text-xs text-slate-400">
-                              {student.registerNo || student.rollNumber || 'No Register ID'}
+                            <p className="font-mono text-xs text-slate-400 flex items-center gap-2">
+                              <span>{student.registerNo || student.rollNumber || 'No Register ID'}</span>
+                              {student.parentPhone && (
+                                <span className="text-[11px] text-slate-500">Ph: {student.parentPhone}</span>
+                              )}
                             </p>
                           </div>
                         </div>
 
-                        {/* Tri-State Interactive Button Pills */}
-                        <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10 gap-1 w-full sm:w-auto justify-center">
-                          <button
-                            type="button"
-                            disabled={holidayInfo?.isHoliday}
-                            onClick={() => handleStatusChange(student._id, 'Present')}
-                            className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                              currentStatus === 'Present'
-                                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                                : 'text-slate-400 hover:text-white hover:bg-white/5'
-                            }`}
-                          >
-                            <CheckCircle2 size={13} /> Present
-                          </button>
+                        {/* Status Pills & WhatsApp Parent Notice */}
+                        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
                           
-                          <button
-                            type="button"
-                            disabled={holidayInfo?.isHoliday}
-                            onClick={() => handleStatusChange(student._id, 'Absent')}
-                            className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                              currentStatus === 'Absent'
-                                ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
-                                : 'text-slate-400 hover:text-white hover:bg-white/5'
-                            }`}
-                          >
-                            <XCircle size={13} /> Absent
-                          </button>
+                          {/* Parent WhatsApp Alert Button (Only visible when student is marked Absent) */}
+                          {currentStatus === 'Absent' && (
+                            <button
+                              type="button"
+                              onClick={() => handleSendWhatsAppAlert(student)}
+                              title="Send WhatsApp Absence Alert to Parent"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer shadow-sm hover:shadow-emerald-500/10"
+                            >
+                              <MessageSquareShare size={14} className="text-emerald-400" />
+                              <span>Notify Parent</span>
+                            </button>
+                          )}
 
-                          <button
-                            type="button"
-                            disabled={holidayInfo?.isHoliday}
-                            onClick={() => handleStatusChange(student._id, 'Late')}
-                            className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                              currentStatus === 'Late'
-                                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
-                                : 'text-slate-400 hover:text-white hover:bg-white/5'
-                            }`}
-                          >
-                            <Clock3 size={13} /> Late
-                          </button>
+                          {/* Present, Absent, Late Tri-State Selector */}
+                          <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10 gap-1 flex-1 lg:flex-none justify-center">
+                            <button
+                              type="button"
+                              disabled={holidayInfo?.isHoliday}
+                              onClick={() => handleStatusChange(student._id, 'Present')}
+                              className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                                currentStatus === 'Present'
+                                  ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+                              }`}
+                            >
+                              <CheckCircle2 size={13} /> Present
+                            </button>
+                            
+                            <button
+                              type="button"
+                              disabled={holidayInfo?.isHoliday}
+                              onClick={() => handleStatusChange(student._id, 'Absent')}
+                              className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                                currentStatus === 'Absent'
+                                  ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+                                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+                              }`}
+                            >
+                              <XCircle size={13} /> Absent
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={holidayInfo?.isHoliday}
+                              onClick={() => handleStatusChange(student._id, 'Late')}
+                              className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                                currentStatus === 'Late'
+                                  ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
+                                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+                              }`}
+                            >
+                              <Clock3 size={13} /> Late
+                            </button>
+                          </div>
+
                         </div>
                       </div>
                     );
@@ -901,7 +937,7 @@ const downloadMonthlyReportPDF = async () => {
                 type="button"
                 disabled={saving || isDateLoading || !isAllMarked || holidayInfo?.isHoliday}
                 onClick={handleSubmitAttendance}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-700 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl font-bold shadow-xl shadow-indigo-500/25 transition-all transform active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none cursor-pointer text-sm"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 bg-linear-to-r from-indigo-600 via-violet-600 to-indigo-700 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl font-bold shadow-xl shadow-indigo-500/25 transition-all transform active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none cursor-pointer text-sm"
               >
                 <Save size={17} />
                 {saving 
@@ -918,7 +954,7 @@ const downloadMonthlyReportPDF = async () => {
 
           </section>
         ) : (
-          <div className="bg-slate-900/40 p-16 rounded-[2rem] border border-white/10 text-center space-y-3">
+          <div className="bg-slate-900/40 p-16 rounded-4xl border border-white/10 text-center space-y-3">
             <BookOpen size={36} className="mx-auto text-slate-600" />
             <h3 className="text-lg font-semibold text-white">No Classes Assigned</h3>
             <p className="text-slate-400 text-sm max-w-md mx-auto">

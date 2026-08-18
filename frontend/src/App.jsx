@@ -11,6 +11,7 @@ import AssignStudents from './components/admin/AssignStudents';
 import TeacherDashboard from './pages/TeacherDashboard';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
+import EmployeeList from './pages/EmployeeList';
 
 const App = () => {
   const { token } = useAppContext();
@@ -47,6 +48,7 @@ const App = () => {
         >
           <Route index element={<AdminDashboard />} />
           <Route path="attendance" element={<Attendance />} />
+          <Route path="employees" element={<EmployeeList />} />
           <Route path="students" element={<Students />} />
           <Route path="add" element={<AddEmployee />} />
           <Route path="assign" element={<AssignStudents />} />

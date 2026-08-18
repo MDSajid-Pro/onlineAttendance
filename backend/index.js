@@ -10,7 +10,6 @@ import attendanceRoutes from "./routes/attendanceRoutes.js";
 import adminRouter from "./routes/adminRoute.js";
 
 dotenv.config();
-
 const app = express();
 
 app.use(cors({ origin: true, credentials: true }));

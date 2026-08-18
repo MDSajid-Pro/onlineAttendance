@@ -103,11 +103,11 @@ const AddEmployee = () => {
       <div className="w-full max-w-6xl space-y-6">
         
         {/* Floating Top Banner */}
-        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-6 md:p-8 rounded-4xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -mr-24 -mt-24"></div>
 
           <div className="space-y-1 relative z-10">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-gradient-to-r from-indigo-500/10 to-violet-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-bold uppercase tracking-widest">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-linear-to-r from-indigo-500/10 to-violet-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-bold uppercase tracking-widest">
               <Sparkles size={13} className="animate-pulse" /> Faculty Provisioning Console
             </div>
             <h1 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight">
@@ -146,7 +146,7 @@ const AddEmployee = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
           {/* Main Form Fields */}
-          <form onSubmit={handleSubmit} className="lg:col-span-7 bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-[2rem] p-6 md:p-8 space-y-6 shadow-2xl">
+          <form onSubmit={handleSubmit} className="lg:col-span-7 bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 md:p-8 space-y-6 shadow-2xl">
             
             {/* Account Role Tabs */}
             <div className="space-y-2">
@@ -159,7 +159,7 @@ const AddEmployee = () => {
                   onClick={() => setFormData({ ...formData, role: 'teacher' })}
                   className={`py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                     formData.role === 'teacher'
-                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25'
+                      ? 'bg-linear-to-r from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25'
                       : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
@@ -170,7 +170,7 @@ const AddEmployee = () => {
                   onClick={() => setFormData({ ...formData, role: 'admin' })}
                   className={`py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                     formData.role === 'admin'
-                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25'
+                      ? 'bg-linear-to-r from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25'
                       : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
@@ -296,7 +296,7 @@ const AddEmployee = () => {
               <button 
                 type="submit" 
                 disabled={loading}
-                className="w-full py-4 bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl font-bold tracking-wide shadow-xl shadow-indigo-500/25 transition-all transform active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-base"
+                className="w-full py-4 bg-linear-to-r from-indigo-600 via-violet-600 to-indigo-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl font-bold tracking-wide shadow-xl shadow-indigo-500/25 transition-all transform active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-base"
               >
                 {loading ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -313,7 +313,7 @@ const AddEmployee = () => {
 
           {/* Holographic ID Badge Preview */}
           <div className="lg:col-span-5 space-y-6">
-            <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-indigo-950/40 border border-white/15 rounded-[2rem] p-7 shadow-2xl relative overflow-hidden space-y-6">
+            <div className="bg-linear-to-br from-slate-900/90 via-slate-900/60 to-indigo-950/40 border border-white/15 rounded-4xl p-7 shadow-2xl relative overflow-hidden space-y-6">
               
               {/* Top Card Badge Header */}
               <div className="flex items-center justify-between pb-4 border-b border-white/10">
@@ -330,7 +330,7 @@ const AddEmployee = () => {
 
               {/* User Avatar + Name Identity */}
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center font-extrabold text-2xl text-white shadow-xl shadow-indigo-500/30 border border-white/20">
+                <div className="w-16 h-16 rounded-2xl bg-linear-to-tr from-indigo-600 to-violet-500 flex items-center justify-center font-extrabold text-2xl text-white shadow-xl shadow-indigo-500/30 border border-white/20">
                   {(formData.name || 'F').charAt(0).toUpperCase()}
                 </div>
                 <div className="space-y-0.5">
@@ -347,7 +347,7 @@ const AddEmployee = () => {
               <div className="bg-slate-950/60 border border-white/10 rounded-2xl p-4 space-y-2 text-xs">
                 <div className="flex justify-between items-center py-0.5">
                   <span className="text-slate-400">Portal Username</span>
-                  <span className="font-mono text-white truncate max-w-[180px]">
+                  <span className="font-mono text-white truncate max-w-45">
                     {formData.email || 'user@college.edu'}
                   </span>
                 </div>
@@ -372,7 +372,7 @@ const AddEmployee = () => {
             </div>
 
             {/* Quick Helper Badge */}
-            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 text-xs text-slate-400 space-y-1">
+            <div className="p-4 rounded-2xl bg-white/2 border border-white/5 text-xs text-slate-400 space-y-1">
               <p className="font-bold text-slate-300 flex items-center gap-1.5">
                 <ShieldCheck size={14} className="text-indigo-400" /> Immediate Activation
               </p>

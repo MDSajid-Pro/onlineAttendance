@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import { 
   UserCheck, 
@@ -15,8 +15,10 @@ import {
   Sparkles,
   ArrowRight,
   Filter,
-  Check
+  Check,
+  UserPlus
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 const COURSES = ['B.Sc', 'B.A', 'B.Com', 'BCA'];
 
@@ -34,6 +36,7 @@ const AssignStudents = () => {
   
   const [teachers, setTeachers] = useState([]);
   const [students, setStudents] = useState([]);
+  const [existingAssignments, setExistingAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   
   const [selectedTeacher, setSelectedTeacher] = useState('');
@@ -41,36 +44,65 @@ const AssignStudents = () => {
   const [semester, setSemester] = useState('1st Semester');
   const [subject, setSubject] = useState('');
   const [selectedStudents, setSelectedStudents] = useState([]);
+  const [alreadyEnrolledIds, setAlreadyEnrolledIds] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uiMessage, setUiMessage] = useState({ type: '', text: '' });
 
-  // 1. Fetch Teachers and Students Concurrently
-  useEffect(() => {
-    const fetchRequiredData = async () => {
-      try {
-        setLoading(true);
-        const [teachersRes, studentsRes] = await Promise.all([
-          axios.get('/api/teacher'),
-          axios.get('/api/students/all')
-        ]);
+  // 1. Fetch Teachers, Students, and Existing Allocations Concurrently
+  const fetchRequiredData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [teachersRes, studentsRes, allocationsRes] = await Promise.all([
+        axios.get('/api/teacher'),
+        axios.get('/api/students/all'),
+        axios.get('/api/teacher/all-allocations').catch(() => ({ data: [] }))
+      ]);
 
-        setTeachers(Array.isArray(teachersRes.data) ? teachersRes.data : teachersRes.data.teachers || []);
-        setStudents(Array.isArray(studentsRes.data) ? studentsRes.data : studentsRes.data.students || []);
-      } catch (err) {
-        setUiMessage({ 
-          type: 'error', 
-          text: `Core Fetch Failure: ${err.response?.data?.message || 'Unable to load instructor/student records.'}` 
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRequiredData();
+      setTeachers(Array.isArray(teachersRes.data) ? teachersRes.data : teachersRes.data.teachers || []);
+      setStudents(Array.isArray(studentsRes.data) ? studentsRes.data : studentsRes.data.students || []);
+      setExistingAssignments(Array.isArray(allocationsRes.data) ? allocationsRes.data : []);
+    } catch (err) {
+      setUiMessage({ 
+        type: 'error', 
+        text: `Core Fetch Failure: ${err.response?.data?.message || 'Unable to load instructor/student records.'}` 
+      });
+    } finally {
+      setLoading(false);
+    }
   }, [axios]);
 
-  // 2. Dynamic Filtering based on selected course, semester, and search
+  useEffect(() => {
+    fetchRequiredData();
+  }, [fetchRequiredData]);
+
+  // 2. Auto-Detect & Pre-Check Enrolled Students When Config Changes
+  useEffect(() => {
+    if (!selectedTeacher || !subject.trim() || !courseName || !semester) {
+      setAlreadyEnrolledIds(new Set());
+      return;
+    }
+
+    // Look for matching batch
+    const match = existingAssignments.find(a => {
+      const matchTeacher = (a.teacher?._id || a.teacher) === selectedTeacher;
+      const matchCourse = (a.courseName || '').toLowerCase() === courseName.toLowerCase();
+      const matchSemester = (a.semester || '').toLowerCase() === semester.toLowerCase();
+      const matchSubject = (a.subject || '').trim().toLowerCase() === subject.trim().toLowerCase();
+      return matchTeacher && matchCourse && matchSemester && matchSubject;
+    });
+
+    if (match && Array.isArray(match.students)) {
+      const enrolled = new Set(match.students.map(s => s._id || s));
+      setAlreadyEnrolledIds(enrolled);
+      // Auto pre-select all existing students
+      setSelectedStudents(Array.from(enrolled));
+    } else {
+      setAlreadyEnrolledIds(new Set());
+    }
+  }, [selectedTeacher, subject, courseName, semester, existingAssignments]);
+
+  // 3. Dynamic Filtering based on selected course, semester, and search
   const filteredStudents = useMemo(() => {
     return students.filter(st => {
       const studentCourse = (st.course || st.courseName || '').trim();
@@ -91,6 +123,10 @@ const AssignStudents = () => {
     return teachers.find(t => t._id === selectedTeacher);
   }, [teachers, selectedTeacher]);
 
+  const newlySelectedCount = useMemo(() => {
+    return selectedStudents.filter(id => !alreadyEnrolledIds.has(id)).length;
+  }, [selectedStudents, alreadyEnrolledIds]);
+
   const handleStudentCheckbox = (studentId) => {
     setSelectedStudents(prev => 
       prev.includes(studentId) 
@@ -104,8 +140,10 @@ const AssignStudents = () => {
     const allSelected = filteredIds.length > 0 && filteredIds.every(id => selectedStudents.includes(id));
 
     if (allSelected) {
+      // Keep only those that weren't in the filtered view
       setSelectedStudents(prev => prev.filter(id => !filteredIds.includes(id)));
     } else {
+      // Merge all visible
       const merged = Array.from(new Set([...selectedStudents, ...filteredIds]));
       setSelectedStudents(merged);
     }
@@ -120,7 +158,7 @@ const AssignStudents = () => {
     }
 
     if (selectedStudents.length === 0) {
-      setUiMessage({ type: 'error', text: 'Please select at least one student before creating the allocation link.' });
+      setUiMessage({ type: 'error', text: 'Please select at least one student before creating or updating the allocation.' });
       return;
     }
 
@@ -134,20 +172,25 @@ const AssignStudents = () => {
     
     try {
       setIsSubmitting(true);
-      setUiMessage({ type: 'loading', text: 'Registering classroom allocation matrix...' });
+      setUiMessage({ type: 'loading', text: 'Syncing classroom allocation matrix...' });
       
       const response = await axios.post('/api/teacher/assign', payload);
       
       if (response.status === 200 || response.status === 201 || response.data?.success) {
-        setUiMessage({ type: 'success', text: `Allocated ${selectedStudents.length} students to ${teacherDetails?.name || 'Faculty'} successfully!` });
-        setSelectedStudents([]);
-        setSubject('');
+        const msg = alreadyEnrolledIds.size > 0 
+          ? `Batch updated! Total students: ${selectedStudents.length} (${newlySelectedCount} newly added).`
+          : `Allocated ${selectedStudents.length} students to ${teacherDetails?.name || 'Faculty'} successfully!`;
+
+        setUiMessage({ type: 'success', text: msg });
+        toast.success(msg);
+        
+        // Refresh allocations in background
+        fetchRequiredData();
       }
     } catch (err) {
-      setUiMessage({ 
-        type: 'error', 
-        text: `Assignment Error: ${err.response?.data?.message || err.message}` 
-      });
+      const errorText = `Assignment Error: ${err.response?.data?.message || err.message}`;
+      setUiMessage({ type: 'error', text: errorText });
+      toast.error(errorText);
     } finally {
       setIsSubmitting(false);
     }
@@ -170,19 +213,19 @@ const AssignStudents = () => {
     <div className="min-h-screen bg-[#090d16] text-slate-100 p-4 md:p-8 flex justify-center">
       <div className="w-full max-w-7xl space-y-6">
         
-        {/* Top Floating Glass Header */}
+        {/* Header Banner */}
         <header className="bg-slate-900/60 backdrop-blur-xl border border-white/10 p-6 md:p-8 rounded-3xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-teal-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
           <div className="space-y-1 relative z-10">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-400 text-xs font-semibold uppercase tracking-wider">
-              <Sparkles size={13} /> Class Allocation Engine
+              <Sparkles size={13} /> Smart Allocation & Batch Sync
             </div>
             <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
               Classroom & Student Allocation
             </h1>
             <p className="text-slate-400 text-sm">
-              Link faculty members with courses, semesters, and active student rosters for streamlined attendance.
+              Link faculty members with courses and append newly missed students directly into the existing batch.
             </p>
           </div>
           
@@ -193,7 +236,9 @@ const AssignStudents = () => {
               </div>
               <div>
                 <p className="text-[11px] text-slate-400 uppercase font-semibold tracking-wider">Total Selected</p>
-                <p className="text-xl font-extrabold text-white leading-tight">{selectedStudents.length} <span className="text-xs font-normal text-slate-400">Students</span></p>
+                <p className="text-xl font-extrabold text-white leading-tight">
+                  {selectedStudents.length} <span className="text-xs font-normal text-slate-400">Students</span>
+                </p>
               </div>
             </div>
           </div>
@@ -220,7 +265,7 @@ const AssignStudents = () => {
           <div className="lg:col-span-5 space-y-6">
             <div className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl">
               <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                <Filter size={16} className="text-teal-400" /> Allocation Configuration
+                <Filter size={16} className="text-teal-400" /> Batch & Subject Configuration
               </h2>
 
               {/* Faculty Instructor */}
@@ -314,10 +359,18 @@ const AssignStudents = () => {
             </div>
 
             {/* Live Summary Preview Box */}
-            <div className="bg-gradient-to-br from-teal-950/40 to-slate-900/60 border border-teal-500/20 rounded-3xl p-5 space-y-3">
-              <p className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
-                <Sparkles size={14} /> Allocation Summary
-              </p>
+            <div className="bg-linear-to-br from-teal-950/40 to-slate-900/60 border border-teal-500/20 rounded-3xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
+                  <Sparkles size={14} /> Allocation Status
+                </p>
+                {alreadyEnrolledIds.size > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                    Existing Batch Found
+                  </span>
+                )}
+              </div>
+              
               <div className="space-y-1.5 text-xs text-slate-300">
                 <p className="flex justify-between">
                   <span className="text-slate-500">Instructor:</span> 
@@ -325,16 +378,22 @@ const AssignStudents = () => {
                 </p>
                 <p className="flex justify-between">
                   <span className="text-slate-500">Batch:</span> 
-                  <span className="font-semibold text-white">{courseName} - {semester}</span>
+                  <span className="font-semibold text-white">{courseName} — {semester}</span>
                 </p>
                 <p className="flex justify-between">
                   <span className="text-slate-500">Subject:</span> 
                   <span className="font-semibold text-teal-300">{subject || 'Untitled Paper'}</span>
                 </p>
                 <p className="flex justify-between pt-2 border-t border-white/10">
-                  <span className="text-slate-400">Total Enrolled:</span> 
-                  <span className="font-bold text-teal-400">{selectedStudents.length} Students</span>
+                  <span className="text-slate-400">Already in Batch:</span> 
+                  <span className="font-mono text-emerald-400 font-bold">{alreadyEnrolledIds.size} Students</span>
                 </p>
+                {newlySelectedCount > 0 && (
+                  <p className="flex justify-between text-teal-300 font-semibold">
+                    <span>Missed / Adding:</span> 
+                    <span>+{newlySelectedCount} New Students</span>
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -350,7 +409,7 @@ const AssignStudents = () => {
                     Enrolled Students Matrix
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Showing {filteredStudents.length} students matching <span className="text-teal-400 font-semibold">{courseName}</span> ({semester})
+                    Showing {filteredStudents.length} students for <span className="text-teal-400 font-semibold">{courseName}</span> ({semester})
                   </p>
                 </div>
 
@@ -378,7 +437,7 @@ const AssignStudents = () => {
                 <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Filter by student name or register number..."
+                  placeholder="Search student name or register number..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   className="w-full pl-11 pr-4 py-3 bg-slate-950/80 border border-white/10 rounded-2xl text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none transition-all"
@@ -386,7 +445,7 @@ const AssignStudents = () => {
               </div>
 
               {/* Student Scrollable List */}
-              <div className="flex-1 min-h-[350px] max-h-[480px] overflow-y-auto bg-slate-950/60 border border-white/10 rounded-2xl p-3 space-y-1.5 divide-y divide-white/5">
+              <div className="flex-1 min-h-87.5 max-h-120 overflow-y-auto bg-slate-950/60 border border-white/10 rounded-2xl p-3 space-y-1.5 divide-y divide-white/5">
                 {filteredStudents.length === 0 ? (
                   <div className="py-20 text-center text-slate-500 space-y-2">
                     <Users size={32} className="mx-auto text-slate-600" />
@@ -396,12 +455,16 @@ const AssignStudents = () => {
                 ) : (
                   filteredStudents.map(st => {
                     const isChecked = selectedStudents.includes(st._id);
+                    const isAlreadyEnrolled = alreadyEnrolledIds.has(st._id);
+
                     return (
                       <label 
                         key={st._id} 
                         className={`flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer ${
                           isChecked 
-                            ? 'bg-teal-500/15 border-teal-500/40 shadow-sm' 
+                            ? isAlreadyEnrolled 
+                              ? 'bg-emerald-500/10 border-emerald-500/30'
+                              : 'bg-teal-500/15 border-teal-500/40 shadow-sm ring-1 ring-teal-500/30' 
                             : 'bg-slate-900/30 border-white/5 hover:border-white/15 hover:bg-slate-900/70'
                         }`}
                       >
@@ -412,13 +475,24 @@ const AssignStudents = () => {
                             onChange={() => handleStudentCheckbox(st._id)}
                             className="accent-teal-500 h-4 w-4 rounded cursor-pointer"
                           />
-                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-teal-400 text-xs">
+                          <div className="w-9 h-9 rounded-xl bg-linear-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-teal-400 text-xs">
                             {(st.fullName || st.name || 'S').charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="text-sm font-semibold text-white">
-                              {st.fullName || st.name}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-white">
+                                {st.fullName || st.name}
+                              </p>
+                              {isAlreadyEnrolled ? (
+                                <span className="text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium">
+                                  In Batch
+                                </span>
+                              ) : isChecked ? (
+                                <span className="text-[10px] bg-teal-500/20 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded-full font-medium">
+                                  + Newly Added
+                                </span>
+                              ) : null}
+                            </div>
                             <p className="text-xs font-mono text-slate-400">
                               {st.registerNo || st.rollNumber || 'No Register ID'}
                             </p>
@@ -444,10 +518,15 @@ const AssignStudents = () => {
                 <button 
                   type="submit" 
                   disabled={isSubmitting || selectedStudents.length === 0}
-                  className="w-full py-4 bg-gradient-to-r from-teal-500 via-emerald-500 to-teal-600 hover:from-teal-400 hover:to-emerald-500 text-white rounded-2xl font-bold tracking-wide shadow-xl shadow-teal-500/20 transition-all transform active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer text-sm md:text-base"
+                  className="w-full py-4 bg-linear-to-r from-teal-500 via-emerald-500 to-teal-600 hover:from-teal-400 hover:to-emerald-500 text-white rounded-2xl font-bold tracking-wide shadow-xl shadow-teal-500/20 transition-all transform active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer text-sm md:text-base"
                 >
                   {isSubmitting ? (
-                    "Deploying Allocation Matrix..."
+                    "Syncing Batch Allocation..."
+                  ) : alreadyEnrolledIds.size > 0 ? (
+                    <>
+                      <UserPlus size={18} />
+                      <span>Update Batch & Append Missed Students ({selectedStudents.length} Total)</span>
+                    </>
                   ) : (
                     <>
                       <span>Finalize & Link Faculty Allocation</span>

@@ -162,7 +162,7 @@ const AdminDashboard = () => {
         {/* Top Glass Navbar */}
         <header className="bg-slate-900/60 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-2xl">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-indigo-500/20">
+            <div className="w-14 h-14 rounded-2xl bg-linear-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-indigo-500/20">
               <LayoutDashboard size={26} />
             </div>
             <div>
@@ -174,21 +174,6 @@ const AdminDashboard = () => {
               </div>
               <p className="text-slate-400 text-sm mt-0.5">Live Student Enrollment & Faculty Allocation Matrix</p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setIsStudentModalOpen(true)}
-              className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
-            >
-              <UserPlus size={18} /> Add Student
-            </button>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 rounded-2xl text-sm font-semibold transition-all cursor-pointer"
-            >
-              <LogOut size={16} />
-            </button>
           </div>
         </header>
 
@@ -273,7 +258,7 @@ const AdminDashboard = () => {
                   </tr>
                 ) : (
                   filteredAllocations.map(a => (
-                    <tr key={a._id} className="hover:bg-white/[0.02] transition-colors">
+                    <tr key={a._id} className="hover:bg-white/2 transition-colors">
                       <td className="py-4 px-5">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold flex items-center justify-center">
@@ -323,7 +308,7 @@ const AdminDashboard = () => {
         {/* Modal: Add New Student Record */}
         {isStudentModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <div className="bg-slate-900 border border-white/15 rounded-[2rem] max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl relative">
+            <div className="bg-slate-900 border border-white/15 rounded-4xl max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl relative">
               
               <div className="flex items-center justify-between pb-4 border-b border-white/10">
                 <div className="flex items-center gap-3">
@@ -415,7 +400,7 @@ const AdminDashboard = () => {
                   <button
                     type="submit"
                     disabled={submittingStudent}
-                    className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                    className="px-6 py-3 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
                   >
                     {submittingStudent ? "Registering..." : (
                       <>
