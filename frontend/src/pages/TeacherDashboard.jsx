@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import { 
   CheckCircle2, 
@@ -20,33 +20,81 @@ import {
   ChevronRight,
   UserCheck,
   AlertCircle,
-  Download,
   Palmtree,
-  FileSpreadsheet,
   FileText,
-  MessageSquareShare,
-  PhoneCall
+  CalendarOff,
+  X,
+  Info,
+  Download,
+  Unlock,
+  Lock
 } from 'lucide-react';
-import { toast } from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // Holiday master list (Format: MM-DD)
-const FIXED_HOLIDAYS = {
+const ACADEMIC_HOLIDAYS = {
   '01-01': "New Year's Day",
   '01-14': 'Makara Sankranti',
   '01-26': 'Republic Day',
+  '03-08': 'Maha Shivaratri',
+  '03-29': 'Good Friday',
+  '04-09': 'Ugadi Festival',
+  '04-11': 'Eid-ul-Fitr (Ramzan)',
+  '04-21': 'Mahaveer Jayanti',
   '05-01': 'May Day / Labour Day',
+  '05-10': 'Basava Jayanti',
+  '06-17': 'Bakrid (Eid al-Adha)',
+  '07-17': 'Muharram',
   '08-15': 'Independence Day',
-  '08-26': 'Milad un-Nabi',
+  '08-26': 'Milad un-Nabi (Id-e-Milad)',
+  '09-07': 'Ganesh Chaturthi',
   '10-02': 'Gandhi Jayanti',
+  '10-11': 'Ayudha Puja / Maha Navami',
+  '10-12': 'Vijayadashami (Dasara)',
+  '10-17': 'Maharshi Valmiki Jayanti',
+  '10-31': 'Naraka Chaturdashi',
   '11-01': 'Kannada Rajyotsava',
-  '12-25': 'Christmas'
+  '11-02': 'Deepavali (Balipadyami)',
+  '11-18': 'Kanakadasa Jayanti',
+  '12-25': 'Christmas Celebration'
+};
+
+const toStandardDateString = (inputDate) => {
+  if (!inputDate) return new Date().toISOString().split('T')[0];
+  if (typeof inputDate === 'string' && inputDate.includes('-')) {
+    const parts = inputDate.split('-');
+    if (parts[0].length === 4) return inputDate;
+  }
+  const d = new Date(inputDate);
+  if (isNaN(d.getTime())) {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const parseDateParts = (dateInput) => {
+  const stdDate = toStandardDateString(dateInput);
+  const [yearStr, monthStr, dayStr] = stdDate.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  const dateObj = new Date(year, month - 1, day);
+
+  return {
+    year,
+    month: String(month).padStart(2, '0'),
+    day: String(day).padStart(2, '0'),
+    standardDate: stdDate,
+    dateObj
+  };
 };
 
 const TeacherDashboard = () => {
   const { axios, setToken, setUser } = useAppContext();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [assignments, setAssignments] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState('');
@@ -54,7 +102,7 @@ const TeacherDashboard = () => {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
   
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
-  const [attendanceRecords, setAttendanceRecords] = useState({}); // { [studentId]: 'Present' | 'Absent' | 'Late' | null }
+  const [attendanceRecords, setAttendanceRecords] = useState({});
   const [isSavedForDate, setIsSavedForDate] = useState(false);
   const [isDateLoading, setIsDateLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,31 +111,83 @@ const TeacherDashboard = () => {
   const [saving, setSaving] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
 
+  // Special Class Override State for Holidays
+  const [specialClassUnlocked, setSpecialClassUnlocked] = useState(false);
+  const [isHolidayModalOpen, setIsHolidayModalOpen] = useState(false);
+
+  // Custom Floating Toast Notification State
+  const [customToast, setCustomToast] = useState({
+    visible: false,
+    type: 'success',
+    title: '',
+    message: ''
+  });
+
+  const showCustomToast = useCallback((type, title, message) => {
+    setCustomToast({
+      visible: true,
+      type,
+      title,
+      message
+    });
+
+    const timer = setTimeout(() => {
+      setCustomToast(prev => ({ ...prev, visible: false }));
+    }, 4500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   const storedUserRaw = localStorage.getItem("user");
   const storedUser = storedUserRaw && storedUserRaw !== "undefined" ? JSON.parse(storedUserRaw) : null;
   const teacherId = storedUser?._id || storedUser?.id;
 
-  // 1. Holiday Calculator
+  // 1. Detect Teacher Login Action
+  useEffect(() => {
+    const isJustLoggedIn = 
+      location.state?.justLoggedIn || 
+      sessionStorage.getItem("faculty_just_logged_in") === "true";
+
+    if (isJustLoggedIn) {
+      sessionStorage.removeItem("faculty_just_logged_in");
+
+      showCustomToast(
+        'success',
+        'Session Authenticated',
+        `Welcome to Attendance Terminal, ${storedUser?.name || 'Faculty Member'}!`
+      );
+      
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, storedUser, showCustomToast]);
+
+  // 2. Active Date Holiday Calculator
   const holidayInfo = useMemo(() => {
     if (!attendanceDate) return null;
-    const [year, month, day] = attendanceDate.split('-');
-    const dateObj = new Date(Number(year), Number(month) - 1, Number(day));
-    
+    const { month, day, dateObj } = parseDateParts(attendanceDate);
+
+    if (isNaN(dateObj.getTime())) return { isHoliday: false, reason: null };
+
     // Check Sunday
     if (dateObj.getDay() === 0) {
       return { isHoliday: true, reason: 'Sunday (Weekly Institutional Off)' };
     }
 
-    // Check fixed calendar holidays
+    // Check fixed holidays
     const mmdd = `${month}-${day}`;
-    if (FIXED_HOLIDAYS[mmdd]) {
-      return { isHoliday: true, reason: FIXED_HOLIDAYS[mmdd] };
+    if (ACADEMIC_HOLIDAYS[mmdd]) {
+      return { isHoliday: true, reason: ACADEMIC_HOLIDAYS[mmdd] };
     }
 
     return { isHoliday: false, reason: null };
   }, [attendanceDate]);
 
-  // 2. Fetch Teacher Assigned Classes
+  // Reset override whenever the selected date changes
+  useEffect(() => {
+    setSpecialClassUnlocked(false);
+  }, [attendanceDate]);
+
+  // 3. Fetch Teacher Assigned Classes
   useEffect(() => {
     const fetchTeacherClasses = async () => {
       if (!teacherId) return;
@@ -103,14 +203,14 @@ const TeacherDashboard = () => {
           setSelectedAssignmentId(list[0]._id);
         }
       } catch {
-        toast.error("Failed to load allocated classrooms");
+        showCustomToast('error', 'Sync Failure', 'Unable to retrieve faculty class matrix.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchTeacherClasses();
-  }, [axios, teacherId]);
+  }, [axios, teacherId, showCustomToast]);
 
   const availableCourses = useMemo(() => {
     return Array.from(new Set(assignments.map(a => a.courseName).filter(Boolean)));
@@ -149,9 +249,12 @@ const TeacherDashboard = () => {
     }
   }, [filteredAssignments, selectedAssignmentId]);
 
-  // 3. Fetch attendance state for active date
+  // 4. Fetch attendance state for active date
   const syncDateAttendance = useCallback(async () => {
     if (!activeAssignment?._id || !attendanceDate) return;
+
+    // Skip auto-fetch on holiday unless unlocked or already saved
+    if (holidayInfo?.isHoliday && !specialClassUnlocked && !isSavedForDate) return;
 
     try {
       setIsDateLoading(true);
@@ -170,8 +273,11 @@ const TeacherDashboard = () => {
           initialMap[studentId] = r.status;
         });
         setIsSavedForDate(true);
+        // Automatically unlock special session if attendance was already logged on this holiday
+        if (holidayInfo?.isHoliday) {
+          setSpecialClassUnlocked(true);
+        }
       } else {
-        // Initial state: Set students to null (unmarked & disabled initially)
         activeAssignment.students?.forEach(st => {
           initialMap[st._id] = null;
         });
@@ -189,7 +295,7 @@ const TeacherDashboard = () => {
     } finally {
       setIsDateLoading(false);
     }
-  }, [axios, activeAssignment, attendanceDate]);
+  }, [axios, activeAssignment, attendanceDate, holidayInfo, specialClassUnlocked, isSavedForDate]);
 
   useEffect(() => {
     syncDateAttendance();
@@ -198,7 +304,11 @@ const TeacherDashboard = () => {
   // Real-time calculations
   const { stats, uncompletedCount, isAllMarked } = useMemo(() => {
     const total = activeAssignment?.students?.length || 0;
-    if (!total) return { stats: { present: 0, absent: 0, late: 0, rate: 0 }, uncompletedCount: 0, isAllMarked: false };
+    const isHolidayLocked = holidayInfo?.isHoliday && !specialClassUnlocked;
+
+    if (!total || isHolidayLocked) {
+      return { stats: { present: 0, absent: 0, late: 0, rate: 0 }, uncompletedCount: 0, isAllMarked: false };
+    }
     
     let present = 0, absent = 0, late = 0, markedCount = 0;
     
@@ -214,10 +324,12 @@ const TeacherDashboard = () => {
     const isAllMarked = total > 0 && uncompletedCount === 0;
 
     return { stats: { present, absent, late, rate }, uncompletedCount, isAllMarked };
-  }, [attendanceRecords, activeAssignment]);
+  }, [attendanceRecords, activeAssignment, holidayInfo, specialClassUnlocked]);
 
   const filteredStudents = useMemo(() => {
-    if (!activeAssignment?.students) return [];
+    const isHolidayLocked = holidayInfo?.isHoliday && !specialClassUnlocked;
+    if (!activeAssignment?.students || isHolidayLocked) return [];
+
     return activeAssignment.students.filter(st => {
       const name = (st.fullName || st.name || '').toLowerCase();
       const reg = (st.registerNo || st.rollNumber || '').toLowerCase();
@@ -233,7 +345,7 @@ const TeacherDashboard = () => {
 
       return matchesSearch && matchesStatus;
     });
-  }, [activeAssignment, searchQuery, statusFilter, attendanceRecords]);
+  }, [activeAssignment, searchQuery, statusFilter, attendanceRecords, holidayInfo, specialClassUnlocked]);
 
   const handleStatusChange = (studentId, newStatus) => {
     setAttendanceRecords(prev => ({
@@ -243,31 +355,13 @@ const TeacherDashboard = () => {
   };
 
   const handleBatchMark = (status) => {
-    if (!activeAssignment?.students || holidayInfo?.isHoliday) return;
+    if (!activeAssignment?.students) return;
     const updated = {};
     activeAssignment.students.forEach(st => {
       updated[st._id] = status;
     });
     setAttendanceRecords(updated);
-    toast.success(`Marked all students as ${status}`);
-  };
-
-  // WhatsApp Alert Notice Generator for Absent Student
-  const handleSendWhatsAppAlert = (student) => {
-    const studentName = student.fullName || student.name || 'Student';
-    const regNo = student.registerNo || student.rollNumber || 'N/A';
-    const subjectName = activeAssignment?.subject || 'Class Subject';
-    const phone = (student.parentPhone || student.phone || '').replace(/\D/g, '');
-
-    const messageText = `Dear Parent, your ward *${studentName}* (Reg No: *${regNo}*) was marked *ABSENT* for *${subjectName}* on *${attendanceDate}* at *Success Degree College*. Please contact the department office for any clarifications.`;
-
-    const formattedPhone = phone.length === 10 ? `91${phone}` : phone;
-
-    const url = formattedPhone 
-      ? `https://wa.me/${formattedPhone}?text=${encodeURIComponent(messageText)}`
-      : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-
-    window.open(url, '_blank');
+    showCustomToast('info', 'Batch Updated', `Marked all students as ${status}.`);
   };
 
   const handleLogout = () => {
@@ -275,17 +369,26 @@ const TeacherDashboard = () => {
     setToken(null);
     if (setUser) setUser(null);
     delete axios.defaults.headers.common["Authorization"];
-    toast.success("Logged out successfully");
-    navigate("/");
+    navigate("/", {
+      state: {
+        loggedOut: true,
+        logoutMessage: "You have been securely logged out of the portal."
+      }
+    });
   };
 
+  // Submit Attendance Handler (supports special compensatory classes)
   const handleSubmitAttendance = async () => {
     if (!activeAssignment) return;
-    if (holidayInfo?.isHoliday) {
-      return toast.error("Attendance submission is disabled on institutional holidays.");
+    
+    if (holidayInfo?.isHoliday && !specialClassUnlocked) {
+      showCustomToast('warning', 'Holiday Active', 'Please unlock Special Class Session before submitting.');
+      return;
     }
+
     if (!isAllMarked) {
-      return toast.error(`Please mark attendance for all students (${uncompletedCount} remaining)`);
+      showCustomToast('error', 'Incomplete Roll Call', `Please assign status for ${uncompletedCount} remaining student(s).`);
+      return;
     }
     
     setSaving(true);
@@ -296,6 +399,7 @@ const TeacherDashboard = () => {
       semester: activeAssignment.semester,
       subject: activeAssignment.subject,
       date: attendanceDate,
+      isSpecialClass: Boolean(holidayInfo?.isHoliday && specialClassUnlocked),
       records: Object.keys(attendanceRecords).map(stId => ({
         student: stId,
         status: attendanceRecords[stId]
@@ -305,20 +409,31 @@ const TeacherDashboard = () => {
     try {
       await axios.post('/api/attendance/submit', payload);
       setIsSavedForDate(true);
-      toast.success(`Attendance submitted for ${attendanceDate}!`);
+      showCustomToast(
+        'success', 
+        'Attendance Recorded', 
+        holidayInfo?.isHoliday 
+          ? `Special class attendance logged for ${attendanceDate}!` 
+          : `Classroom log saved for ${attendanceDate}.`
+      );
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to save attendance");
+      showCustomToast('error', 'Save Failure', err.response?.data?.message || 'Could not persist attendance to database.');
     } finally {
       setSaving(false);
     }
   };
 
   // Monthly Attendance PDF Generator
-  const downloadMonthlyReportPDF = async () => {
+  const downloadDetailedMonthlyReportPDF = async () => {
     if (!activeAssignment) return;
     setGeneratingReport(true);
+
     try {
-      const [year, month] = attendanceDate.split('-');
+      const { year, month } = parseDateParts(attendanceDate);
+      const monthNumber = parseInt(month, 10);
+      const totalDaysInMonth = new Date(year, monthNumber, 0).getDate();
+      const monthName = new Date(year, monthNumber - 1).toLocaleString('default', { month: 'long' });
+
       const { data } = await axios.get('/api/attendance/monthly-report', {
         params: {
           assignmentId: activeAssignment._id,
@@ -327,17 +442,26 @@ const TeacherDashboard = () => {
         }
       });
 
-      const logs = data.logs || [];
+      const logs = Array.isArray(data.logs) ? data.logs : [];
       if (logs.length === 0) {
-        toast.error(`No attendance logs recorded for ${month}/${year}`);
+        showCustomToast('info', 'No Data Available', `No attendance logs recorded for ${monthName} ${year}.`);
         return;
       }
 
-      const studentMap = {};
+      const logsByDay = {};
+      logs.forEach(log => {
+        if (log.date) {
+          const dayNum = parseInt(log.date.split('-')[2], 10);
+          logsByDay[dayNum] = log;
+        }
+      });
+
+      const studentMatrix = {};
       activeAssignment.students?.forEach(st => {
-        studentMap[st._id] = {
-          name: st.fullName || st.name,
-          regNo: st.registerNo || 'N/A',
+        studentMatrix[st._id] = {
+          name: st.fullName || st.name || 'Unnamed Student',
+          regNo: st.registerNo || st.rollNumber || 'N/A',
+          dayStatus: {},
           present: 0,
           absent: 0,
           late: 0,
@@ -346,36 +470,123 @@ const TeacherDashboard = () => {
       });
 
       logs.forEach(log => {
+        const dayNum = parseInt(log.date.split('-')[2], 10);
         log.records?.forEach(rec => {
           const stId = typeof rec.student === 'object' ? rec.student?._id : rec.student;
-          if (studentMap[stId]) {
-            if (rec.status === 'Present') studentMap[stId].present++;
-            else if (rec.status === 'Absent') studentMap[stId].absent++;
-            else if (rec.status === 'Late') studentMap[stId].late++;
+          if (studentMatrix[stId]) {
+            if (rec.status === 'Present') {
+              studentMatrix[stId].dayStatus[dayNum] = 'P';
+              studentMatrix[stId].present++;
+            } else if (rec.status === 'Absent') {
+              studentMatrix[stId].dayStatus[dayNum] = 'A';
+              studentMatrix[stId].absent++;
+            } else if (rec.status === 'Late') {
+              studentMatrix[stId].dayStatus[dayNum] = 'L';
+              studentMatrix[stId].late++;
+            }
           }
         });
       });
 
-      const doc = new jsPDF('p', 'mm', 'a4');
-      const monthName = new Date(Number(year), Number(month) - 1).toLocaleString('default', { month: 'long' });
+      const studentList = Object.values(studentMatrix);
+      const totalStudents = studentList.length;
+      let aggregatePercentageSum = 0;
+      let shortageCount = 0;
 
-      doc.setFontSize(18);
-      doc.setTextColor(20, 24, 33);
-      doc.text("Success Degree College", 14, 18);
-      
-      doc.setFontSize(10);
-      doc.setTextColor(80, 90, 110);
-      doc.text(`Monthly Attendance Report — ${monthName} ${year}`, 14, 25);
-      doc.text(`Course: ${activeAssignment.courseName} | Semester: ${activeAssignment.semester} | Subject: ${activeAssignment.subject}`, 14, 31);
-      doc.text(`Faculty: ${storedUser?.name || 'Faculty Member'} | Total Sessions: ${logs.length}`, 14, 37);
+      studentList.forEach(st => {
+        const pct = Math.round(((st.present + st.late * 0.5) / (logs.length || 1)) * 100);
+        aggregatePercentageSum += pct;
+        if (pct < 75) shortageCount++;
+      });
 
-      const tableHeaders = [["#", "Register No", "Student Name", "Present", "Absent", "Late", "Attendance %"]];
-      const tableRows = Object.values(studentMap).map((st, idx) => {
-        const percentage = Math.round(((st.present + st.late * 0.5) / (st.totalSessions || 1)) * 100);
+      const classAverage = totalStudents > 0 ? Math.round(aggregatePercentageSum / totalStudents) : 0;
+
+      const doc = new jsPDF('l', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      doc.setFillColor(30, 27, 75);
+      doc.rect(0, 0, pageWidth, 28, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255);
+      doc.text("SUCCESS DEGREE COLLEGE", 14, 11);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(199, 210, 254);
+      doc.text("Affiliated to Gulbarga University, Kalaburagi | Official Academic Roll-Call Register", 14, 17);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(244, 244, 245);
+      doc.text(`STATEMENT OF ATTENDANCE — ${monthName.toUpperCase()} ${year}`, 14, 23);
+
+      doc.setDrawColor(226, 232, 240);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(14, 32, pageWidth - 28, 17, 2, 2, 'FD');
+
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.setFont('helvetica', 'bold');
+      doc.text("DEGREE & TERM:", 18, 38);
+      doc.text("SUBJECT PAPER:", 85, 38);
+      doc.text("FACULTY MEMBER:", 165, 38);
+      doc.text("CALENDAR SUMMARY:", 225, 38);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(15, 23, 42);
+      doc.text(`${activeAssignment.courseName} — ${activeAssignment.semester}`, 18, 44);
+      doc.text(`${activeAssignment.subject}`, 85, 44);
+      doc.text(`${storedUser?.name || 'Faculty Member'} ${storedUser?.employeeId ? `(${storedUser.employeeId})` : ''}`, 165, 44);
+      doc.text(`Sessions: ${logs.length} | Avg: ${classAverage}% | Defaulters (<75%): ${shortageCount}`, 225, 44);
+
+      const dayHeaders = [];
+      for (let d = 1; d <= totalDaysInMonth; d++) {
+        dayHeaders.push(String(d));
+      }
+
+      const tableHead = [
+        [
+          { content: "#", rowSpan: 1 },
+          { content: "Reg No", rowSpan: 1 },
+          { content: "Student Name", rowSpan: 1 },
+          ...dayHeaders.map(d => ({ content: d, styles: { halign: 'center' } })),
+          { content: "P", styles: { halign: 'center', fillColor: [16, 185, 129] } },
+          { content: "A", styles: { halign: 'center', fillColor: [244, 63, 94] } },
+          { content: "L", styles: { halign: 'center', fillColor: [245, 158, 11] } },
+          { content: "%", styles: { halign: 'center', fillColor: [79, 70, 229] } }
+        ]
+      ];
+
+      const tableBody = studentList.map((st, idx) => {
+        const percentage = Math.round(((st.present + st.late * 0.5) / (logs.length || 1)) * 100);
+        
+        const dayCells = [];
+        for (let d = 1; d <= totalDaysInMonth; d++) {
+          const dObj = new Date(year, monthNumber - 1, d);
+          const mmdd = `${month}-${String(d).padStart(2, '0')}`;
+          
+          let cellValue = st.dayStatus[d];
+          if (!cellValue) {
+            if (dObj.getDay() === 0) {
+              cellValue = 'Sun';
+            } else if (ACADEMIC_HOLIDAYS[mmdd]) {
+              cellValue = 'H';
+            } else if (logsByDay[d]) {
+              cellValue = '-';
+            } else {
+              cellValue = '';
+            }
+          }
+          dayCells.push(cellValue);
+        }
+
         return [
           idx + 1,
           st.regNo,
           st.name,
+          ...dayCells,
           st.present,
           st.absent,
           st.late,
@@ -384,66 +595,74 @@ const TeacherDashboard = () => {
       });
 
       autoTable(doc, {
-        startY: 42,
-        head: tableHeaders,
-        body: tableRows,
-        theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
-        styles: { fontSize: 9, cellPadding: 3 }
+        startY: 52,
+        head: tableHead,
+        body: tableBody,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [67, 56, 202],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 6.5,
+          cellPadding: 1.2
+        },
+        styles: {
+          fontSize: 6.5,
+          cellPadding: 1,
+          valign: 'middle',
+          textColor: [30, 41, 59]
+        },
+        columnStyles: {
+          0: { cellWidth: 7, halign: 'center' },
+          1: { cellWidth: 20, fontStyle: 'bold' },
+          2: { cellWidth: 38 },
+          [totalDaysInMonth + 3]: { cellWidth: 7, halign: 'center', fontStyle: 'bold', textColor: [5, 150, 105] },
+          [totalDaysInMonth + 4]: { cellWidth: 7, halign: 'center', fontStyle: 'bold', textColor: [225, 29, 72] },
+          [totalDaysInMonth + 5]: { cellWidth: 7, halign: 'center', fontStyle: 'bold', textColor: [217, 119, 6] },
+          [totalDaysInMonth + 6]: { cellWidth: 11, halign: 'center', fontStyle: 'bold' }
+        },
+        didParseCell: function (data) {
+          if (data.section === 'body') {
+            const rawVal = data.cell.raw;
+            if (rawVal === 'A') {
+              data.cell.styles.textColor = [225, 29, 72];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (rawVal === 'P') {
+              data.cell.styles.textColor = [5, 150, 105];
+            } else if (rawVal === 'L') {
+              data.cell.styles.textColor = [217, 119, 6];
+            } else if (rawVal === 'Sun') {
+              data.cell.styles.textColor = [148, 163, 184];
+              data.cell.styles.fillColor = [241, 245, 249];
+            } else if (rawVal === 'H') {
+              data.cell.styles.textColor = [217, 119, 6];
+              data.cell.styles.fillColor = [254, 243, 199];
+              data.cell.styles.fontStyle = 'bold';
+            }
+
+            if (data.column.index === totalDaysInMonth + 6) {
+              const pctNum = parseInt(rawVal, 10);
+              if (!isNaN(pctNum) && pctNum < 75) {
+                data.cell.styles.textColor = [225, 29, 72];
+                data.cell.styles.fillColor = [254, 226, 226];
+                data.cell.styles.fontStyle = 'bold';
+              } else {
+                data.cell.styles.textColor = [5, 150, 105];
+              }
+            }
+          }
+        },
+        margin: { left: 14, right: 14, bottom: 26 }
       });
 
-      doc.save(`Attendance_${activeAssignment.subject}_${monthName}_${year}.pdf`);
-      toast.success("Monthly PDF Report downloaded!");
+      const safeSubject = activeAssignment.subject.replace(/[^a-zA-Z0-9]/g, '_');
+      doc.save(`Attendance_Register_${safeSubject}_${monthName}_${year}.pdf`);
+      showCustomToast('success', 'Detailed Register Exported', `Downloaded complete roll register for ${monthName} ${year}.`);
     } catch (err) {
-      console.error("PDF generation error:", err);
-      toast.error("Failed to generate report: " + (err.message || "Unknown error"));
+      console.error("Detailed PDF Generation Error:", err);
+      showCustomToast('error', 'Export Failed', err.message || 'Unable to build detailed attendance register.');
     } finally {
       setGeneratingReport(false);
-    }
-  };
-
-  // Monthly CSV / Excel Export
-  const downloadMonthlyReportCSV = async () => {
-    if (!activeAssignment) return;
-    try {
-      const [year, month] = attendanceDate.split('-');
-      const { data } = await axios.get('/api/attendance/monthly-report', {
-        params: { assignmentId: activeAssignment._id, month, year }
-      });
-
-      const logs = data.logs || [];
-      if (logs.length === 0) {
-        toast.error(`No attendance logs recorded for ${month}/${year}`);
-        return;
-      }
-
-      let csvContent = "data:text/csv;charset=utf-8,";
-      csvContent += "Register No,Student Name,Course,Semester,Present Days,Absent Days,Late Days,Total Sessions,Attendance Rate\n";
-
-      activeAssignment.students?.forEach(st => {
-        let present = 0, absent = 0, late = 0;
-        logs.forEach(log => {
-          const rec = log.records?.find(r => (typeof r.student === 'object' ? r.student?._id : r.student) === st._id);
-          if (rec?.status === 'Present') present++;
-          else if (rec?.status === 'Absent') absent++;
-          else if (rec?.status === 'Late') late++;
-        });
-
-        const rate = `${Math.round(((present + late * 0.5) / (logs.length || 1)) * 100)}%`;
-        csvContent += `"${st.registerNo || ''}","${st.fullName || st.name}","${activeAssignment.courseName}","${activeAssignment.semester}",${present},${absent},${late},${logs.length},"${rate}"\n`;
-      });
-
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `Attendance_${activeAssignment.subject}_${month}_${year}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      toast.success("Monthly CSV Export downloaded!");
-    } catch {
-      toast.error("Failed to export CSV report");
     }
   };
 
@@ -458,16 +677,53 @@ const TeacherDashboard = () => {
     );
   }
 
+  const isHolidayLocked = holidayInfo?.isHoliday && !specialClassUnlocked;
+
   return (
     <div className="min-h-screen bg-[#06080e] text-slate-100 p-4 md:p-8 flex justify-center selection:bg-indigo-500/30 selection:text-indigo-200">
+      
+      {/* Floating Custom Toast */}
+      {customToast.visible && (
+        <div className="fixed top-6 right-6 z-50 max-w-sm w-full animate-fadeIn transition-all">
+          <div className={`p-4 rounded-2xl backdrop-blur-2xl border shadow-2xl flex items-start gap-3.5 ${
+            customToast.type === 'success' 
+              ? 'bg-slate-900/95 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10' 
+              : customToast.type === 'warning'
+                ? 'bg-slate-900/95 border-amber-500/40 text-amber-300 shadow-amber-500/10'
+                : customToast.type === 'info'
+                  ? 'bg-slate-900/95 border-indigo-500/40 text-indigo-300 shadow-indigo-500/10'
+                  : 'bg-slate-900/95 border-rose-500/40 text-rose-300 shadow-rose-500/10'
+          }`}>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              customToast.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : customToast.type === 'warning' ? 'bg-amber-500/20 text-amber-400' : customToast.type === 'info' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-rose-500/20 text-rose-400'
+            }`}>
+              {customToast.type === 'success' && <CheckCircle2 size={19} />}
+              {customToast.type === 'warning' && <AlertCircle size={19} />}
+              {customToast.type === 'info' && <Info size={19} />}
+              {customToast.type === 'error' && <XCircle size={19} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-bold text-sm text-white leading-tight">{customToast.title}</h4>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{customToast.message}</p>
+            </div>
+            <button 
+              onClick={() => setCustomToast(prev => ({ ...prev, visible: false }))}
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="w-full max-w-7xl space-y-6">
 
         {/* Navigation Header */}
-        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-5 md:p-6 rounded-4xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-5 md:p-6 rounded-3xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
           <div className="flex items-center gap-4 relative z-10">
-            <div className="w-13 h-13 rounded-2xl bg-linear-to-br from-indigo-500 via-indigo-600 to-violet-700 flex items-center justify-center shadow-lg shadow-indigo-500/25 text-white border border-white/20">
+            <div className="w-13 h-13 rounded-2xl  from-indigo-500 via-indigo-600 to-violet-700 flex items-center justify-center shadow-bg-gradient-to-brlg shadow-indigo-500/25 text-white border border-white/20">
               <GraduationCap size={26} />
             </div>
             <div>
@@ -491,34 +747,37 @@ const TeacherDashboard = () => {
           <div className="flex flex-wrap items-center gap-3 relative z-10">
             {/* Date Picker */}
             <div className="flex items-center gap-2.5 bg-slate-950/80 border border-white/10 px-4 py-2 rounded-2xl text-xs md:text-sm shadow-inner hover:border-white/20 transition-colors">
-              <Calendar size={15} className="text-indigo-400" />
+              <Calendar size={15} className="text-indigo-400 shrink-0" />
               <input
                 type="date"
-                value={attendanceDate}
+                value={toStandardDateString(attendanceDate)}
                 onChange={(e) => setAttendanceDate(e.target.value)}
-                className="bg-transparent text-white font-medium focus:outline-none cursor-pointer text-xs md:text-sm"
+                className="bg-transparent text-white font-medium focus:outline-none cursor-pointer text-xs md:text-sm appearance-none"
               />
             </div>
 
-            {/* Monthly Report Buttons */}
+            {/* Holiday Schedule Modal Trigger */}
             <button
-              onClick={downloadMonthlyReportPDF}
+              onClick={() => setIsHolidayModalOpen(true)}
+              title="View Academic Holiday Calendar"
+              className="flex items-center gap-2 px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-2xl text-xs font-bold transition-all cursor-pointer"
+            >
+              <Palmtree size={14} />
+              <span>Holidays</span>
+            </button>
+
+            {/* Detailed Monthly Report PDF Export */}
+            <button
+              onClick={downloadDetailedMonthlyReportPDF}
               disabled={generatingReport || !activeAssignment}
-              title="Download Monthly Attendance PDF Report"
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 rounded-2xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+              title="Download Detailed Attendance Register (PDF)"
+              className="flex items-center gap-2 px-4 py-2  from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 bg-gradient-to-rhover:to-violet-500 text-white rounded-2xl text-xs font-bold transition-all shadow-md shadow-indigo-500/20 cursor-pointer disabled:opacity-50"
             >
-              <FileText size={14} /> PDF Report
+              <Download size={14} />
+              <span>{generatingReport ? "Generating..." : "Register PDF"}</span>
             </button>
 
-            <button
-              onClick={downloadMonthlyReportCSV}
-              disabled={!activeAssignment}
-              title="Download Monthly CSV Export"
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
-            >
-              <FileSpreadsheet size={14} /> Excel / CSV
-            </button>
-
+            {/* Logout Button */}
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 rounded-2xl text-xs font-bold transition-all cursor-pointer hover:shadow-lg hover:shadow-rose-500/10"
@@ -528,26 +787,49 @@ const TeacherDashboard = () => {
           </div>
         </header>
 
-        {/* Holiday Notification Banner */}
+        {/* Holiday Notification Banner with Extra Class Unlock Toggle */}
         {holidayInfo?.isHoliday && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 text-amber-300 shadow-lg animate-fadeIn">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
-                <Palmtree size={20} className="text-amber-400" />
+          <div className="bg-linear-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 border border-amber-500/30 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-amber-300 shadow-xl animate-fadeIn">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 shadow-md">
+                <Palmtree size={24} className="text-amber-400" />
               </div>
               <div>
-                <h4 className="font-bold text-sm text-white">Institutional Holiday Notice ({attendanceDate})</h4>
-                <p className="text-xs text-amber-400/90">{holidayInfo.reason} — Classroom roll-call submission is closed for this day.</p>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-extrabold text-base text-white">Institutional Holiday Notice</h4>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-400/30">
+                    {attendanceDate}
+                  </span>
+                </div>
+                <p className="text-xs text-amber-300/90 mt-0.5">
+                  {holidayInfo.reason} &bull; Conducting an extra/compensatory lecture today? Unlock the roll-call session below.
+                </p>
               </div>
             </div>
-            <span className="text-[11px] font-mono px-3 py-1 bg-amber-500/20 rounded-xl border border-amber-500/30 text-amber-200 hidden sm:inline-block">
-              Holiday Mode Active
-            </span>
+
+            {/* Special Class Session Toggle Button */}
+            <button
+              onClick={() => {
+                const nextState = !specialClassUnlocked;
+                setSpecialClassUnlocked(nextState);
+                if (nextState) {
+                  showCustomToast('info', 'Special Session Active', 'Compensatory class roll-call unlocked for marking.');
+                }
+              }}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer shadow-md ${
+                specialClassUnlocked
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/40'
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40'
+              }`}
+            >
+              {specialClassUnlocked ? <Lock size={14} /> : <Unlock size={14} />}
+              <span>{specialClassUnlocked ? "Special Class Unlocked (Lock)" : "Take Class Today (Unlock)"}</span>
+            </button>
           </div>
         )}
 
         {/* Course & Semester Filter Canvas */}
-        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 space-y-6 shadow-xl relative overflow-hidden">
+        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl relative overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/5">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -689,9 +971,9 @@ const TeacherDashboard = () => {
 
         </section>
 
-        {/* Main Roll Call Station */}
+        {/* Main Attendance Station */}
         {activeAssignment ? (
-          <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 md:p-8 space-y-6 shadow-2xl">
+          <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl">
             
             {/* Header with Stats Counter & Status */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10">
@@ -702,7 +984,7 @@ const TeacherDashboard = () => {
                   </span>
                   {holidayInfo?.isHoliday ? (
                     <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
-                      <Palmtree size={12} /> Holiday: {holidayInfo.reason}
+                      <Palmtree size={12} /> {specialClassUnlocked ? `Special Session (${holidayInfo.reason})` : `Holiday: ${holidayInfo.reason}`}
                     </span>
                   ) : isSavedForDate ? (
                     <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
@@ -718,248 +1000,333 @@ const TeacherDashboard = () => {
               </div>
 
               {/* Stat Metric Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div className="px-4 py-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex flex-col justify-center">
-                  <span className="text-[10px] uppercase tracking-wider text-emerald-500/80 flex items-center gap-1">
-                    <CheckCircle2 size={12} /> Present
-                  </span>
-                  <span className="text-lg font-extrabold text-white mt-0.5">{stats.present}</span>
-                </div>
+              {!isHolidayLocked && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="px-4 py-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex flex-col justify-center">
+                    <span className="text-[10px] uppercase tracking-wider text-emerald-500/80 flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Present
+                    </span>
+                    <span className="text-lg font-extrabold text-white mt-0.5">{stats.present}</span>
+                  </div>
 
-                <div className="px-4 py-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold flex flex-col justify-center">
-                  <span className="text-[10px] uppercase tracking-wider text-rose-500/80 flex items-center gap-1">
-                    <XCircle size={12} /> Absent
-                  </span>
-                  <span className="text-lg font-extrabold text-white mt-0.5">{stats.absent}</span>
-                </div>
+                  <div className="px-4 py-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold flex flex-col justify-center">
+                    <span className="text-[10px] uppercase tracking-wider text-rose-500/80 flex items-center gap-1">
+                      <XCircle size={12} /> Absent
+                    </span>
+                    <span className="text-lg font-extrabold text-white mt-0.5">{stats.absent}</span>
+                  </div>
 
-                <div className="px-4 py-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold flex flex-col justify-center">
-                  <span className="text-[10px] uppercase tracking-wider text-amber-500/80 flex items-center gap-1">
-                    <Clock3 size={12} /> Late
-                  </span>
-                  <span className="text-lg font-extrabold text-white mt-0.5">{stats.late}</span>
-                </div>
+                  <div className="px-4 py-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold flex flex-col justify-center">
+                    <span className="text-[10px] uppercase tracking-wider text-amber-500/80 flex items-center gap-1">
+                      <Clock3 size={12} /> Late
+                    </span>
+                    <span className="text-lg font-extrabold text-white mt-0.5">{stats.late}</span>
+                  </div>
 
-                <div className="px-4 py-2.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-bold flex flex-col justify-center">
-                  <span className="text-[10px] uppercase tracking-wider text-indigo-400 flex items-center gap-1">
-                    <Sparkles size={12} /> Rate
-                  </span>
-                  <span className="text-lg font-extrabold text-white mt-0.5">{stats.rate}%</span>
+                  <div className="px-4 py-2.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-bold flex flex-col justify-center">
+                    <span className="text-[10px] uppercase tracking-wider text-indigo-400 flex items-center gap-1">
+                      <Sparkles size={12} /> Rate
+                    </span>
+                    <span className="text-lg font-extrabold text-white mt-0.5">{stats.rate}%</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* Filter & Batch Actions */}
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              
-              <div className="relative w-full md:w-80">
-                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  placeholder="Search student or register number..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-11 pr-4 py-2.5 bg-slate-950/80 border border-white/10 rounded-2xl text-xs md:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
-                <div className="flex bg-slate-950/80 p-1 rounded-2xl border border-white/10 text-xs">
-                  {['ALL', 'Present', 'Absent', 'Late', 'Unmarked'].map(st => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => setStatusFilter(st)}
-                      className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
-                        statusFilter === st 
-                          ? 'bg-indigo-600 text-white shadow-md' 
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))}
+            {/* Condition A: Holiday Locked (Prompt to Unlock) */}
+            {isHolidayLocked ? (
+              <div className="py-14 px-6 rounded-3xl bg-linear-to-b from-amber-500/10 via-slate-950/40 to-slate-950/80 border border-amber-500/20 text-center flex flex-col items-center justify-center space-y-4 shadow-inner">
+                <div className="w-16 h-16 rounded-3xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-xl shadow-amber-500/10">
+                  <Palmtree size={32} />
+                </div>
+                
+                <div className="space-y-1.5 max-w-lg">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-300 text-xs font-bold">
+                    <CalendarOff size={13} /> Institutional Holiday Active
+                  </div>
+                  <h3 className="text-xl font-extrabold text-white">
+                    {holidayInfo.reason}
+                  </h3>
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    Classroom roll-call operations are paused for holidays. If you are conducting a special, practical, or revision class today, click below to unlock the attendance register.
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="pt-3">
                   <button
-                    type="button"
-                    disabled={holidayInfo?.isHoliday}
-                    onClick={() => handleBatchMark('Present')}
-                    className="px-3 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold rounded-xl transition-all cursor-pointer disabled:opacity-40"
+                    onClick={() => {
+                      setSpecialClassUnlocked(true);
+                      showCustomToast('info', 'Session Unlocked', 'Compensatory class attendance enabled.');
+                    }}
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-linear-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold rounded-2xl text-xs transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
                   >
-                    All Present
-                  </button>
-                  <button
-                    type="button"
-                    disabled={holidayInfo?.isHoliday}
-                    onClick={() => handleBatchMark('Absent')}
-                    className="px-3 py-2 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold rounded-xl transition-all cursor-pointer disabled:opacity-40"
-                  >
-                    All Absent
+                    <Unlock size={15} />
+                    <span>Conduct Special Class Session</span>
                   </button>
                 </div>
-              </div>
-
-            </div>
-
-            {/* Student Roll Call Table */}
-            {isDateLoading ? (
-              <div className="p-16 text-center text-slate-400 text-sm flex items-center justify-center gap-3">
-                <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                Synchronizing attendance for {attendanceDate}...
               </div>
             ) : (
-              <div className="divide-y divide-white/5 border border-white/10 rounded-2xl overflow-hidden bg-slate-950/60">
-                {filteredStudents.length === 0 ? (
-                  <div className="p-16 text-center text-slate-500 text-sm">
-                    No student records match the active search or status filter.
+              /* Condition B: Active Working Day or Unlocked Special Session */
+              <>
+                {/* Search & Batch Action Bar */}
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="relative w-full md:w-80">
+                    <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Search student or register number..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-11 pr-4 py-2.5 bg-slate-950/80 border border-white/10 rounded-2xl text-xs md:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+                    <div className="flex bg-slate-950/80 p-1 rounded-2xl border border-white/10 text-xs">
+                      {['ALL', 'Present', 'Absent', 'Late', 'Unmarked'].map(st => (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => setStatusFilter(st)}
+                          className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                            statusFilter === st 
+                              ? 'bg-indigo-600 text-white shadow-md' 
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {st}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleBatchMark('Present')}
+                        className="px-3 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                      >
+                        All Present
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBatchMark('Absent')}
+                        className="px-3 py-2 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                      >
+                        All Absent
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Student Roll Call Table */}
+                {isDateLoading ? (
+                  <div className="p-16 text-center text-slate-400 text-sm flex items-center justify-center gap-3">
+                    <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    Synchronizing attendance for {attendanceDate}...
                   </div>
                 ) : (
-                  filteredStudents.map(student => {
-                    const currentStatus = attendanceRecords[student._id];
-
-                    return (
-                      <div 
-                        key={student._id} 
-                        className="p-4 sm:px-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 hover:bg-white/2 transition-colors"
-                      >
-                        {/* Student Details */}
-                        <div className="flex items-center gap-3.5">
-                          <div className="w-10 h-10 rounded-xl bg-linear-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-indigo-400 shadow-sm text-sm">
-                            {(student.fullName || student.name || 'S').charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-white text-sm sm:text-base leading-snug">
-                                {student.fullName || student.name}
-                              </h4>
-                              {!currentStatus && (
-                                <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium">
-                                  Pending
-                                </span>
-                              )}
-                            </div>
-                            <p className="font-mono text-xs text-slate-400 flex items-center gap-2">
-                              <span>{student.registerNo || student.rollNumber || 'No Register ID'}</span>
-                              {student.parentPhone && (
-                                <span className="text-[11px] text-slate-500">Ph: {student.parentPhone}</span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Status Pills & WhatsApp Parent Notice */}
-                        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
-                          
-                          {/* Parent WhatsApp Alert Button (Only visible when student is marked Absent) */}
-                          {currentStatus === 'Absent' && (
-                            <button
-                              type="button"
-                              onClick={() => handleSendWhatsAppAlert(student)}
-                              title="Send WhatsApp Absence Alert to Parent"
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer shadow-sm hover:shadow-emerald-500/10"
-                            >
-                              <MessageSquareShare size={14} className="text-emerald-400" />
-                              <span>Notify Parent</span>
-                            </button>
-                          )}
-
-                          {/* Present, Absent, Late Tri-State Selector */}
-                          <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10 gap-1 flex-1 lg:flex-none justify-center">
-                            <button
-                              type="button"
-                              disabled={holidayInfo?.isHoliday}
-                              onClick={() => handleStatusChange(student._id, 'Present')}
-                              className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                                currentStatus === 'Present'
-                                  ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-                              }`}
-                            >
-                              <CheckCircle2 size={13} /> Present
-                            </button>
-                            
-                            <button
-                              type="button"
-                              disabled={holidayInfo?.isHoliday}
-                              onClick={() => handleStatusChange(student._id, 'Absent')}
-                              className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                                currentStatus === 'Absent'
-                                  ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
-                                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-                              }`}
-                            >
-                              <XCircle size={13} /> Absent
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={holidayInfo?.isHoliday}
-                              onClick={() => handleStatusChange(student._id, 'Late')}
-                              className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                                currentStatus === 'Late'
-                                  ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
-                                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-                              }`}
-                            >
-                              <Clock3 size={13} /> Late
-                            </button>
-                          </div>
-
-                        </div>
+                  <div className="divide-y divide-white/5 border border-white/10 rounded-2xl overflow-hidden bg-slate-950/60">
+                    {filteredStudents.length === 0 ? (
+                      <div className="p-16 text-center text-slate-500 text-sm">
+                        No student records match the active search or status filter.
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
+                    ) : (
+                      filteredStudents.map(student => {
+                        const currentStatus = attendanceRecords[student._id];
 
-            {/* Bottom Bar: Action Trigger & Validation Alert */}
-            <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/10">
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                {holidayInfo?.isHoliday ? (
-                  <span className="text-amber-400 flex items-center gap-1.5 font-medium">
-                    <Palmtree size={14} /> Submissions closed for {holidayInfo.reason}
-                  </span>
-                ) : !isAllMarked ? (
-                  <span className="text-amber-400 flex items-center gap-1.5 font-medium">
-                    <AlertCircle size={14} /> {uncompletedCount} student{uncompletedCount > 1 ? 's' : ''} still unmarked
-                  </span>
-                ) : (
-                  <span className="text-emerald-400 flex items-center gap-1.5 font-medium">
-                    <CheckCircle2 size={14} /> All students marked and ready for submission
-                  </span>
+                        return (
+                          <div 
+                            key={student._id} 
+                            className="p-4 sm:px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-white/2 transition-colors"
+                          >
+                            {/* Student Details */}
+                            <div className="flex items-center gap-3.5">
+                              <div className="w-10 h-10 rounded-xl bg-linear-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-indigo-400 shadow-sm text-sm">
+                                {(student.fullName || student.name || 'S').charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-semibold text-white text-sm sm:text-base leading-snug">
+                                    {student.fullName || student.name}
+                                  </h4>
+                                  {!currentStatus && (
+                                    <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium">
+                                      Pending
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="font-mono text-xs text-slate-400">
+                                  {student.registerNo || student.rollNumber || 'No Register ID'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Status Buttons */}
+                            <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10 gap-1 w-full sm:w-auto justify-center">
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(student._id, 'Present')}
+                                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                  currentStatus === 'Present'
+                                    ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                              >
+                                <CheckCircle2 size={13} /> Present
+                              </button>
+                              
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(student._id, 'Absent')}
+                                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                  currentStatus === 'Absent'
+                                    ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                              >
+                                <XCircle size={13} /> Absent
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(student._id, 'Late')}
+                                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                  currentStatus === 'Late'
+                                    ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
+                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                              >
+                                <Clock3 size={13} /> Late
+                              </button>
+                            </div>
+
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 )}
-              </div>
-              
-              <button
-                type="button"
-                disabled={saving || isDateLoading || !isAllMarked || holidayInfo?.isHoliday}
-                onClick={handleSubmitAttendance}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 bg-linear-to-r from-indigo-600 via-violet-600 to-indigo-700 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl font-bold shadow-xl shadow-indigo-500/25 transition-all transform active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none cursor-pointer text-sm"
-              >
-                <Save size={17} />
-                {saving 
-                  ? "Saving to Database..." 
-                  : holidayInfo?.isHoliday
-                    ? "Holiday — Submissions Closed"
-                    : !isAllMarked 
-                      ? "Complete Roll Call to Submit" 
-                      : isSavedForDate 
-                        ? "Update Attendance" 
-                        : "Submit Attendance"}
-              </button>
-            </div>
+
+                {/* Bottom Bar: Action Trigger & Validation Alert */}
+                <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/10">
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    {!isAllMarked ? (
+                      <span className="text-amber-400 flex items-center gap-1.5 font-medium">
+                        <AlertCircle size={14} /> {uncompletedCount} student{uncompletedCount > 1 ? 's' : ''} still unmarked
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 flex items-center gap-1.5 font-medium">
+                        <CheckCircle2 size={14} /> All students marked and ready for submission
+                      </span>
+                    )}
+                  </div>
+                  
+                  <button
+                    type="button"
+                    disabled={saving || isDateLoading || !isAllMarked}
+                    onClick={handleSubmitAttendance}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 bg-linear-to-r from-indigo-600 via-violet-600 to-indigo-700 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl font-bold shadow-xl shadow-indigo-500/25 transition-all transform active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none cursor-pointer text-sm"
+                  >
+                    <Save size={17} />
+                    {saving 
+                      ? "Saving to Database..." 
+                      : !isAllMarked 
+                        ? "Complete Roll Call to Submit" 
+                        : isSavedForDate 
+                          ? "Update Attendance" 
+                          : "Submit Attendance"}
+                  </button>
+                </div>
+              </>
+            )}
 
           </section>
         ) : (
-          <div className="bg-slate-900/40 p-16 rounded-4xl border border-white/10 text-center space-y-3">
+          <div className="bg-slate-900/40 p-16 rounded-3xl border border-white/10 text-center space-y-3">
             <BookOpen size={36} className="mx-auto text-slate-600" />
             <h3 className="text-lg font-semibold text-white">No Classes Assigned</h3>
             <p className="text-slate-400 text-sm max-w-md mx-auto">
               You do not have any courses or batches assigned yet. Contact the college administrator to allocate your subjects.
             </p>
+          </div>
+        )}
+
+        {/* MODAL: Annual Academic Holiday Calendar */}
+        {isHolidayModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+            <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-2xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[85vh] flex flex-col">
+              
+              {/* Modal Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                    <Palmtree size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <span>Academic Holiday Schedule</span>
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                        {Object.keys(ACADEMIC_HOLIDAYS).length} Gazetted Days
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">Institutional & Karnataka State Gazetted non-instructional days.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsHolidayModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Holiday Items Grid / List */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                {Object.entries(ACADEMIC_HOLIDAYS).map(([dateKey, holidayName]) => {
+                  const [mStr, dStr] = dateKey.split('-');
+                  const monthName = new Date(2026, parseInt(mStr, 10) - 1, parseInt(dStr, 10)).toLocaleString('default', { month: 'short' });
+                  const isCurrentDate = attendanceDate && attendanceDate.endsWith(dateKey);
+
+                  return (
+                    <div 
+                      key={dateKey}
+                      className={`p-3.5 rounded-2xl border flex items-center justify-between gap-4 transition-all ${
+                        isCurrentDate 
+                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-200 shadow-md shadow-amber-500/10' 
+                          : 'bg-slate-950/60 border-white/5 text-slate-300 hover:bg-slate-950/80 hover:border-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-12 h-10 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center text-center font-bold">
+                          <span className="text-[9px] uppercase tracking-wider text-amber-400 leading-none">{monthName}</span>
+                          <span className="text-sm text-white font-mono leading-tight">{dStr}</span>
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-sm text-white">{holidayName}</h4>
+                          <span className="text-[10px] text-slate-400 font-mono">Date Code: {dateKey}</span>
+                        </div>
+                      </div>
+
+                      <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20 font-medium">
+                        Institution Off
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+                <span>* Faculty may unlock sessions on holidays for compensatory classes.</span>
+                <button
+                  onClick={() => setIsHolidayModalOpen(false)}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+
+            </div>
           </div>
         )}
 

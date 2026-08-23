@@ -30,7 +30,7 @@ export const submitAttendance = async (req, res) => {
       filter,
       { $set: update },
       { 
-        returnDocument: 'after', // Replaces deprecated `new: true`
+        returnDocument: 'after',
         upsert: true, 
         runValidators: true,
         setDefaultsOnInsert: true 
@@ -52,14 +52,37 @@ export const submitAttendance = async (req, res) => {
   }
 };
 
+// GET: Supports /history?date=YYYY-MM-DD or /history/:assignmentId
 export const getAttendanceHistory = async (req, res) => {
   try {
-    const { assignmentId } = req.params;
-    const history = await Attendance.find({ assignment: assignmentId })
-      .populate('records.student', 'fullName registerNo email')
-      .sort({ date: -1 });
+    const assignmentId = req.params.assignmentId || req.query.assignmentId;
+    const { date, courseName, semester } = req.query;
 
-    res.status(200).json(history);
+    const query = {};
+
+    if (assignmentId && mongoose.Types.ObjectId.isValid(assignmentId)) {
+      query.assignment = new mongoose.Types.ObjectId(assignmentId);
+    }
+    if (date) {
+      query.date = date.trim();
+    }
+    if (courseName) {
+      query.courseName = courseName.trim();
+    }
+    if (semester) {
+      query.semester = semester.trim();
+    }
+
+    const history = await Attendance.find(query)
+      .populate('teacher', 'name email employeeId')
+      .populate('records.student', 'fullName name registerNo rollNumber parentPhone phone course semester')
+      .sort({ date: -1, createdAt: -1 });
+
+    // Returns array or wraps in object so both frontend variants work seamlessly
+    res.status(200).json({
+      success: true,
+      attendances: history
+    });
   } catch (error) {
     console.error("Error fetching history:", error);
     res.status(500).json({ message: "Failed to fetch attendance history", error: error.message });
@@ -80,7 +103,6 @@ export const getAttendanceByDate = async (req, res) => {
       date: date.trim()
     });
 
-    // If attendance was already submitted for this date, return its records
     if (attendance) {
       return res.status(200).json({
         exists: true,
@@ -89,7 +111,6 @@ export const getAttendanceByDate = async (req, res) => {
       });
     }
 
-    // No prior attendance for this date
     return res.status(200).json({ exists: false, records: [] });
   } catch (error) {
     console.error("Error fetching date attendance:", error);
@@ -107,13 +128,12 @@ export const getMonthlyAttendanceReport = async (req, res) => {
     }
 
     const monthStr = String(month).padStart(2, '0');
-    // Regex matching "YYYY-MM-DD" dates starting with "YYYY-MM"
     const datePrefixRegex = new RegExp(`^${year}-${monthStr}`);
 
     const logs = await Attendance.find({
       assignment: assignmentId,
       date: { $regex: datePrefixRegex }
-    }).populate('records.student', 'fullName registerNo course semester');
+    }).populate('records.student', 'fullName registerNo parentPhone course semester');
 
     res.status(200).json({ success: true, logs });
   } catch (error) {

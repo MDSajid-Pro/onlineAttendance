@@ -179,7 +179,7 @@ const Students = () => {
       <div className="w-full max-w-7xl space-y-6">
 
         {/* Top Header */}
-        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+        <header className="bg-slate-900/50 backdrop-blur-2xl border border-white/10 p-6 md:p-8 rounded-4xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
           <div className="flex items-center gap-4 relative z-10">
@@ -206,7 +206,7 @@ const Students = () => {
           <div className="flex items-center gap-3 relative z-10">
             <button
               onClick={openCreateModal}
-              className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
+              className="flex items-center gap-2 px-5 py-3 bg-linear-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
             >
               <UserPlus size={16} /> Enroll New Student
             </button>
@@ -214,7 +214,7 @@ const Students = () => {
         </header>
 
         {/* Stream & Semester Filter Panel */}
-        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-[2rem] p-6 space-y-5 shadow-xl">
+        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 space-y-5 shadow-xl">
           <div className="flex items-center justify-between pb-3 border-b border-white/5">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
               <SlidersHorizontal size={14} className="text-indigo-400" /> Directory Query Filters
@@ -274,7 +274,7 @@ const Students = () => {
         </section>
 
         {/* Students Table Section */}
-        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-[2rem] p-6 md:p-8 space-y-6 shadow-2xl">
+        <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-4xl p-6 md:p-8 space-y-6 shadow-2xl">
           
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="relative w-full md:w-80">
@@ -315,7 +315,7 @@ const Students = () => {
                   </tr>
                 ) : (
                   filteredStudents.map((st, idx) => (
-                    <tr key={st._id} className="hover:bg-white/[0.02] transition-colors">
+                    <tr key={st._id} className="hover:bg-white/2 transition-colors">
                       <td className="py-4 px-5 text-slate-500 font-mono">{idx + 1}</td>
                       
                       {/* Name & Avatar */}
@@ -376,7 +376,7 @@ const Students = () => {
         {/* Modal: Create & Edit Student CRUD */}
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-            <div className="bg-slate-900 border border-white/15 rounded-[2rem] max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl relative">
+            <div className="bg-slate-900 border border-white/15 rounded-4xl max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl relative">
               
               <div className="flex items-center justify-between pb-4 border-b border-white/10">
                 <div className="flex items-center gap-3">
@@ -472,7 +472,7 @@ const Students = () => {
                   <button
                     type="submit"
                     disabled={modalSubmitting}
-                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                    className="px-6 py-3 bg-linear-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
                   >
                     {modalSubmitting ? "Processing..." : (
                       <>

@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.post('/submit', submitAttendance);
 router.get('/by-date', getAttendanceByDate);
+router.get('/history', getAttendanceHistory);
 router.get('/history/:assignmentId', getAttendanceHistory);
 router.get('/monthly-report', getMonthlyAttendanceReport);
 

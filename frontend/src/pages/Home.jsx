@@ -1,19 +1,82 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
-import { toast } from "react-hot-toast";
+import { 
+  Eye, 
+  EyeOff, 
+  Lock, 
+  Mail, 
+  GraduationCap, 
+  ShieldCheck, 
+  Sparkles, 
+  ArrowRight, 
+  CheckCircle2, 
+  AlertCircle, 
+  X,
+  Loader2,
+  LogOut
+} from 'lucide-react';
 
 const Home = () => {
   const { axios, setToken, setUser } = useAppContext();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState("teacher");
   const [loading, setLoading] = useState(false);
 
+  // Custom Floating Toast State
+  const [toastNotification, setToastNotification] = useState({
+    visible: false,
+    type: 'success', // 'success' | 'error' | 'logout'
+    title: '',
+    message: ''
+  });
+
+  const showCustomToast = useCallback((type, title, message) => {
+    setToastNotification({
+      visible: true,
+      type,
+      title,
+      message
+    });
+
+    const timer = setTimeout(() => {
+      setToastNotification(prev => ({ ...prev, visible: false }));
+    }, 4500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Detect Logout Redirect
+  useEffect(() => {
+    if (location.state?.loggedOut || location.state?.logoutMessage) {
+      showCustomToast(
+        'logout', 
+        'Session Closed', 
+        location.state.logoutMessage || 'You have been successfully logged out.'
+      );
+      window.history.replaceState({}, document.title);
+      return;
+    }
+
+    const logoutFlag = sessionStorage.getItem('just_logged_out');
+    if (logoutFlag) {
+      showCustomToast('logout', 'Session Closed', 'Logged out successfully from portal.');
+      sessionStorage.removeItem('just_logged_out');
+    }
+  }, [location, showCustomToast]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      showCustomToast('error', 'Authentication Failed', 'Please provide both email and password.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -36,18 +99,23 @@ const Home = () => {
         localStorage.setItem("role", user?.role || role);
         axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-        toast.success(`Welcome back, ${user?.name || (role === 'admin' ? 'Admin' : 'Teacher')}!`);
+        // Set Session Storage fallback marker for immediate greeting
+        sessionStorage.setItem("faculty_just_logged_in", "true");
 
         if ((user?.role || role) === "teacher") {
-          navigate("/teacher");
+          navigate("/teacher", { state: { justLoggedIn: true } });
         } else {
-          navigate("/admin");
+          navigate("/admin", { state: { justLoggedIn: true } });
         }
       } else {
-        toast.error(data.message || "Invalid credentials");
+        showCustomToast('error', 'Sign In Rejected', data.message || "Invalid credentials provided.");
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || error.message || "Login failed");
+      showCustomToast(
+        'error', 
+        'Sign In Error', 
+        error.response?.data?.message || error.message || "Unable to reach authentication server."
+      );
     } finally {
       setLoading(false);
     }
@@ -58,7 +126,7 @@ const Home = () => {
     const storedUserRaw = localStorage.getItem("user");
     const storedRole = localStorage.getItem("role");
 
-    if (storedToken) {
+    if (storedToken && !location.state?.loggedOut) {
       setToken(storedToken);
       axios.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
       
@@ -78,95 +146,196 @@ const Home = () => {
         navigate("/admin");
       }
     }
-  }, [setToken, axios, navigate]);
+  }, [setToken, axios, navigate, location]);
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-slate-900">
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-600/30 blur-[120px] animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-violet-600/30 blur-[120px] animate-pulse"></div>
+    <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-[#06080e] text-slate-100 p-4 md:p-8 selection:bg-indigo-500/30 selection:text-indigo-200">
+      
+      {/* Ambient Lighting Background Spheres */}
+      <div className="absolute top-[-10%] left-[-10%] w-125 h-125 rounded-full bg-indigo-600/15 blur-[140px] pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-125 h-125 rounded-full bg-violet-600/15 blur-[140px] pointer-events-none"></div>
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-87.5 h-87.5 rounded-full bg-indigo-500/5 blur-[100px] pointer-events-none"></div>
 
-      <div className="relative z-10 w-full max-w-5xl px-6 flex flex-col lg:flex-row items-center gap-12">
-        <div className="lg:w-1/2 text-center lg:text-left space-y-6">
-          <div className="inline-block px-4 py-1.5 mb-2 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-sm font-medium">
-            Academic Management & Attendance Portal
+      {/* Floating Glass Custom Notification Toast */}
+      {toastNotification.visible && (
+        <div className="fixed top-6 right-6 z-50 max-w-sm w-full animate-fadeIn transition-all">
+          <div className={`p-4 rounded-2xl backdrop-blur-2xl border shadow-2xl flex items-start gap-3.5 ${
+            toastNotification.type === 'success' 
+              ? 'bg-slate-900/95 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10' 
+              : 'bg-slate-900/95 border-rose-500/40 text-rose-300 shadow-rose-500/10'
+          }`}>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              toastNotification.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+            }`}>
+              {toastNotification.type === 'success' ? <CheckCircle2 size={20} /> : toastNotification.type === 'logout' ? <LogOut size={18} /> : <AlertCircle size={20} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-bold text-sm text-white leading-tight">{toastNotification.title}</h4>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{toastNotification.message}</p>
+            </div>
+            <button 
+              onClick={() => setToastNotification(prev => ({ ...prev, visible: false }))}
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X size={15} />
+            </button>
           </div>
-          <h1 className="text-5xl lg:text-7xl font-extrabold text-white tracking-tight leading-tight">
-            Success Degree <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-400">College</span>
-          </h1>
-          <p className="text-slate-400 text-lg lg:text-xl max-w-lg leading-relaxed">
-            Real-time classroom attendance tracking and faculty course management.
-          </p>
+        </div>
+      )}
+
+      {/* Main Container */}
+      <div className="relative z-10 w-full max-w-6xl flex flex-col lg:flex-row items-center justify-between gap-12 lg:gap-16">
+        
+        {/* Left Hero Showcase */}
+        <div className="lg:w-1/2 text-center lg:text-left space-y-6">
+          
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-bold uppercase tracking-wider">
+            <Sparkles size={14} className="text-indigo-400" />
+            Institutional Academic Terminal
+          </div>
+          
+          <div className="space-y-3">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-[1.15]">
+              Success Degree <br />
+              <span className="bg-linear-to-br from-indigo-400 via-violet-300 to-indigo-200 bg-clip-text text-transparent">
+                College Portal
+              </span>
+            </h1>
+            <p className="text-slate-400 text-sm sm:text-base lg:text-lg max-w-lg leading-relaxed">
+              Real-time roll-call logging, automated registers, and faculty course management matrix.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 pt-2 max-w-md mx-auto lg:mx-0">
+            <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/5 backdrop-blur-md">
+              <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase">
+                <GraduationCap size={15} /> Stream Matrix
+              </div>
+              <p className="text-slate-400 text-xs mt-1">B.Sc, B.A, B.Com & BCA</p>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/5 backdrop-blur-md">
+              <div className="flex items-center gap-2 text-violet-400 font-bold text-xs uppercase">
+                <ShieldCheck size={15} /> Automated Sync
+              </div>
+              <p className="text-slate-400 text-xs mt-1">Real-Time Registry</p>
+            </div>
+          </div>
+
         </div>
 
+        {/* Right Glass Authentication Card */}
         <div className="lg:w-1/2 w-full max-w-md">
-          <div className="backdrop-blur-xl bg-white/10 p-8 lg:p-10 rounded-[2.5rem] border border-white/20 shadow-2xl">
-            <div className="mb-6">
-              <h2 className="text-3xl font-bold text-white">Portal Sign In</h2>
-              <p className="text-slate-400 mt-1 text-sm">Select your account type to proceed</p>
+          <div className="backdrop-blur-2xl bg-slate-900/60 p-8 sm:p-10 rounded-[2.5rem] border border-white/10 shadow-2xl shadow-black/50 relative overflow-hidden">
+            
+            {/* Header */}
+            <div className="mb-6 space-y-1">
+              <h2 className="text-2xl font-black text-white tracking-tight">Access Terminal</h2>
+              <p className="text-slate-400 text-xs">Authorize with registered institution credentials.</p>
             </div>
 
-            <div className="flex bg-slate-950/40 p-1.5 rounded-2xl mb-6 border border-white/10">
+            {/* Role Switcher Pill Bar */}
+            <div className="flex bg-slate-950/80 p-1.5 rounded-2xl mb-6 border border-white/10 relative">
               <button
                 type="button"
                 onClick={() => setRole("teacher")}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   role === "teacher"
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                    ? "bg-linear-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25 border border-indigo-400/30"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                Teacher
+                <GraduationCap size={15} />
+                <span>Faculty</span>
               </button>
+              
               <button
                 type="button"
                 onClick={() => setRole("admin")}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   role === "admin"
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                    ? "bg-linear-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25 border border-indigo-400/30"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                Admin
+                <ShieldCheck size={15} />
+                <span>Principal / Admin</span>
               </button>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-300 ml-1">
-                  {role === "teacher" ? "Teacher Email" : "Admin Email"}
+            <form onSubmit={handleLogin} className="space-y-4">
+              
+              {/* Email Address */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Mail size={13} className="text-indigo-400" />
+                  <span>{role === "teacher" ? "Faculty Email" : "Administrator Email"}</span>
                 </label>
                 <input 
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={role === "teacher" ? "teacher@success.edu" : "admin@success.edu"} 
-                  className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:bg-white/10 outline-none transition-all" 
+                  placeholder={role === "teacher" ? "lecturer@sdc.edu.in" : "admin@sdc.edu.in"} 
+                  className="w-full px-4 py-3.5 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" 
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-300 ml-1">Password</label>
-                <input 
-                  type="password" 
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••" 
-                  className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:bg-white/10 outline-none transition-all" 
-                />
+              {/* Password with Show / Hide Toggle */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Lock size={13} className="text-indigo-400" />
+                  <span>Security Password</span>
+                </label>
+                <div className="relative">
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••" 
+                    className="w-full pl-4 pr-12 py-3.5 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors cursor-pointer p-1"
+                    title={showPassword ? "Hide Password" : "Show Password"}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
 
+              {/* Sign In Button */}
               <button 
                 type="submit" 
                 disabled={loading}
-                className="w-full mt-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/25 transition-all transform active:scale-[0.98] disabled:opacity-50"
+                className="w-full mt-2 py-4 bg-linear-to-br from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-2xl shadow-xl shadow-indigo-500/25 transition-all transform active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer text-sm"
               >
-                {loading ? "Authenticating..." : `Sign In as ${role === 'admin' ? 'Admin' : 'Teacher'}`}
+                {loading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Verifying Access...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Enter {role === 'admin' ? 'Principal Desk' : 'Faculty Console'}</span>
+                    <ArrowRight size={16} />
+                  </>
+                )}
               </button>
+
             </form>
+
+            <div className="mt-6 pt-5 border-t border-white/10 text-center">
+              <p className="text-[11px] text-slate-500 font-medium">
+                Success Degree College &bull; Faculty Attendance Portal
+              </p>
+            </div>
+
           </div>
         </div>
+
       </div>
     </div>
   );

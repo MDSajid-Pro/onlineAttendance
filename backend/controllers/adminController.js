@@ -14,7 +14,7 @@ export const teacherLogin = async (req, res) => {
     // 1. Find teacher in database
     const teacher = await User.findOne({ email: email.toLowerCase().trim() });
     if (!teacher) {
-      return res.json({ success: false, message: "Invalid email or password" });
+      return res.json({ success: false, message: "Invalid email" });
     }
 
     // 2. Validate role
@@ -25,7 +25,7 @@ export const teacherLogin = async (req, res) => {
     // 3. Compare hashed password
     const isMatch = await bcrypt.compare(password, teacher.password);
     if (!isMatch) {
-      return res.json({ success: false, message: "Invalid email or password" });
+      return res.json({ success: false, message: "Invalid password" });
     }
 
     // 4. Generate JWT
