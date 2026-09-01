@@ -60,6 +60,16 @@ const ACADEMIC_HOLIDAYS = {
   '12-25': 'Christmas Celebration'
 };
 
+// Formats 'YYYY-MM-DD' into readable 'DD/MM/YYYY' for mobile and desktop displays
+const formatDisplayDate = (inputDate) => {
+  if (!inputDate) return '';
+  const str = String(inputDate).split('T')[0];
+  const parts = str.split('-');
+  if (parts.length !== 3) return str;
+  const [year, month, day] = parts;
+  return `${day}/${month}/${year}`;
+};
+
 const toStandardDateString = (inputDate) => {
   if (!inputDate) return new Date().toISOString().split('T')[0];
   if (typeof inputDate === 'string' && inputDate.includes('-')) {
@@ -253,7 +263,6 @@ const TeacherDashboard = () => {
   const syncDateAttendance = useCallback(async () => {
     if (!activeAssignment?._id || !attendanceDate) return;
 
-    // Skip auto-fetch on holiday unless unlocked or already saved
     if (holidayInfo?.isHoliday && !specialClassUnlocked && !isSavedForDate) return;
 
     try {
@@ -273,7 +282,6 @@ const TeacherDashboard = () => {
           initialMap[studentId] = r.status;
         });
         setIsSavedForDate(true);
-        // Automatically unlock special session if attendance was already logged on this holiday
         if (holidayInfo?.isHoliday) {
           setSpecialClassUnlocked(true);
         }
@@ -377,7 +385,7 @@ const TeacherDashboard = () => {
     });
   };
 
-  // Submit Attendance Handler (supports special compensatory classes)
+  // Submit Attendance Handler
   const handleSubmitAttendance = async () => {
     if (!activeAssignment) return;
     
@@ -413,8 +421,8 @@ const TeacherDashboard = () => {
         'success', 
         'Attendance Recorded', 
         holidayInfo?.isHoliday 
-          ? `Special class attendance logged for ${attendanceDate}!` 
-          : `Classroom log saved for ${attendanceDate}.`
+          ? `Special class attendance logged for ${formatDisplayDate(attendanceDate)}!` 
+          : `Classroom log saved for ${formatDisplayDate(attendanceDate)}.`
       );
     } catch (err) {
       showCustomToast('error', 'Save Failure', err.response?.data?.message || 'Could not persist attendance to database.');
@@ -423,7 +431,7 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Monthly Attendance PDF Generator
+  // Monthly Attendance PDF Generator with Color-Coded Academic Calendar Details & Signatures
   const downloadDetailedMonthlyReportPDF = async () => {
     if (!activeAssignment) return;
     setGeneratingReport(true);
@@ -455,6 +463,24 @@ const TeacherDashboard = () => {
           logsByDay[dayNum] = log;
         }
       });
+
+      // Compute Holidays & Sundays in this specific month
+      let sundaysCount = 0;
+      let holidaysCount = 0;
+      const holidaysInThisMonth = [];
+
+      for (let d = 1; d <= totalDaysInMonth; d++) {
+        const dObj = new Date(year, monthNumber - 1, d);
+        const mmdd = `${month}-${String(d).padStart(2, '0')}`;
+        if (dObj.getDay() === 0) {
+          sundaysCount++;
+        } else if (ACADEMIC_HOLIDAYS[mmdd]) {
+          holidaysCount++;
+          holidaysInThisMonth.push(`${String(d).padStart(2, '0')} ${monthName.slice(0, 3)}: ${ACADEMIC_HOLIDAYS[mmdd]}`);
+        }
+      }
+
+      const totalNonWorkingDays = sundaysCount + holidaysCount;
 
       const studentMatrix = {};
       activeAssignment.students?.forEach(st => {
@@ -503,7 +529,9 @@ const TeacherDashboard = () => {
 
       const doc = new jsPDF('l', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
 
+      // Top Primary Navy Header
       doc.setFillColor(30, 27, 75);
       doc.rect(0, 0, pageWidth, 28, 'F');
 
@@ -515,31 +543,118 @@ const TeacherDashboard = () => {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(199, 210, 254);
-      doc.text("Affiliated to Gulbarga University, Kalaburagi | Official Academic Roll-Call Register", 14, 17);
+      doc.text("Affiliated to Bidar University, Bidar | Official Academic Roll-Call Register", 14, 17);
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(244, 244, 245);
       doc.text(`STATEMENT OF ATTENDANCE — ${monthName.toUpperCase()} ${year}`, 14, 23);
 
+      // Metadata Info Box
       doc.setDrawColor(226, 232, 240);
       doc.setFillColor(248, 250, 252);
-      doc.roundedRect(14, 32, pageWidth - 28, 17, 2, 2, 'FD');
+      doc.roundedRect(14, 30, pageWidth - 28, 14, 2, 2, 'FD');
 
-      doc.setFontSize(8);
+      doc.setFontSize(7);
       doc.setTextColor(71, 85, 105);
-      doc.setFont('helvetica', 'bold');
-      doc.text("DEGREE & TERM:", 18, 38);
-      doc.text("SUBJECT PAPER:", 85, 38);
-      doc.text("FACULTY MEMBER:", 165, 38);
-      doc.text("CALENDAR SUMMARY:", 225, 38);
+      doc.setFont('Poppins', 'bold');
+      doc.text("DEGREE & TERM:", 17, 34.5);
+      doc.text("SUBJECT PAPER:", 85, 34.5);
+      doc.text("FACULTY INSTRUCTOR:", 155, 34.5);
+      doc.text("CALENDAR SUMMARY:", 225, 34.5);
 
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('Poppins', 'normal');
       doc.setTextColor(15, 23, 42);
-      doc.text(`${activeAssignment.courseName} — ${activeAssignment.semester}`, 18, 44);
-      doc.text(`${activeAssignment.subject}`, 85, 44);
-      doc.text(`${storedUser?.name || 'Faculty Member'} ${storedUser?.employeeId ? `(${storedUser.employeeId})` : ''}`, 165, 44);
-      doc.text(`Sessions: ${logs.length} | Avg: ${classAverage}% | Defaulters (<75%): ${shortageCount}`, 225, 44);
+      doc.text(`${activeAssignment.courseName} — ${activeAssignment.semester}`, 17, 40);
+      doc.text(`${activeAssignment.subject}`, 85, 40);
+      doc.text(`${storedUser?.name || 'Faculty Member'} ${storedUser?.employeeId ? `(${storedUser.employeeId})` : ''}`, 155, 40);
+      doc.text(`Classes Taken: ${logs.length} | Total Days: ${totalDaysInMonth}`, 225, 40);
+
+      // --- ROW 1: 5 Evenly Spaced Summary Badges (Including Total Holidays) ---
+      const badgeY = 46.5;
+      const boxHeight = 6.5;
+      const totalWidth = pageWidth - 28;
+      const gap = 3;
+      const cardW = (totalWidth - (gap * 4)) / 5;
+
+      // 1. Sessions Held
+      doc.setFillColor(238, 242, 255);
+      doc.setDrawColor(199, 210, 254);
+      doc.roundedRect(14, badgeY, cardW, boxHeight, 1.2, 1.2, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.8);
+      doc.setTextColor(67, 56, 202);
+      doc.text(`Sessions Held: ${logs.length} Days`, 14 + (cardW / 2), badgeY + 4.3, { align: 'center' });
+
+      // 2. Sundays
+      const x2 = 14 + cardW + gap;
+      doc.setFillColor(241, 245, 249);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(x2, badgeY, cardW, boxHeight, 1.2, 1.2, 'FD');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Sundays (Off): ${sundaysCount} Days`, x2 + (cardW / 2), badgeY + 4.3, { align: 'center' });
+
+      // 3. Total Non-Working Days & Gazetted Holidays
+      const x3 = x2 + cardW + gap;
+      doc.setFillColor(254, 243, 199);
+      doc.setDrawColor(251, 191, 36);
+      doc.roundedRect(x3, badgeY, cardW, boxHeight, 1.2, 1.2, 'FD');
+      doc.setTextColor(180, 83, 9);
+      doc.text(`Total Holidays: ${totalNonWorkingDays} (${holidaysCount} Gazetted)`, x3 + (cardW / 2), badgeY + 4.3, { align: 'center' });
+
+      // 4. Batch Average
+      const x4 = x3 + cardW + gap;
+      doc.setFillColor(236, 253, 245);
+      doc.setDrawColor(167, 243, 208);
+      doc.roundedRect(x4, badgeY, cardW, boxHeight, 1.2, 1.2, 'FD');
+      doc.setTextColor(5, 150, 105);
+      doc.text(`Batch Average: ${classAverage}%`, x4 + (cardW / 2), badgeY + 4.3, { align: 'center' });
+
+      // 5. Shortage Defaulters
+      const x5 = x4 + cardW + gap;
+      doc.setFillColor(255, 241, 242);
+      doc.setDrawColor(254, 205, 211);
+      doc.roundedRect(x5, badgeY, cardW, boxHeight, 1.2, 1.2, 'FD');
+      doc.setTextColor(225, 29, 72);
+      doc.text(`Shortage (<75%): ${shortageCount} Students`, x5 + (cardW / 2), badgeY + 4.3, { align: 'center' });
+
+      // --- ROW 2: Compact Legend Line ---
+      const legendY = 57.5;
+      doc.setFontSize(6.8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(51, 65, 85);
+      doc.text("Legend:", 14, legendY);
+
+      // P
+      doc.setFillColor(16, 185, 129);
+      doc.rect(26, legendY - 2.5, 3.2, 3, 'F');
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'normal');
+      doc.text("P: Present", 31, legendY);
+
+      // A
+      doc.setFillColor(244, 63, 94);
+      doc.rect(48, legendY - 2.5, 3.2, 3, 'F');
+      doc.text("A: Absent", 53, legendY);
+
+      // L
+      doc.setFillColor(245, 158, 11);
+      doc.rect(70, legendY - 2.5, 3.2, 3, 'F');
+      doc.text("L: Late (0.5)", 75, legendY);
+
+      // Sun
+      doc.setFillColor(226, 232, 240);
+      doc.rect(94, legendY - 2.5, 3.2, 3, 'F');
+      doc.text("Sun: Weekly Off", 99, legendY);
+
+      // H
+      doc.setFillColor(254, 243, 199);
+      doc.setDrawColor(217, 119, 6);
+      doc.rect(124, legendY - 2.5, 3.2, 3, 'FD');
+      const holidaySummary = holidaysInThisMonth.length > 0
+        ? `H: Holiday (${holidaysInThisMonth[0]}${holidaysInThisMonth.length > 1 ? ` +${holidaysInThisMonth.length - 1} more` : ''})`
+        : "H: Gazetted Holiday";
+      doc.text(holidaySummary, 129, legendY);
 
       const dayHeaders = [];
       for (let d = 1; d <= totalDaysInMonth; d++) {
@@ -595,7 +710,7 @@ const TeacherDashboard = () => {
       });
 
       autoTable(doc, {
-        startY: 52,
+        startY: 61,
         head: tableHead,
         body: tableBody,
         theme: 'grid',
@@ -608,7 +723,7 @@ const TeacherDashboard = () => {
         },
         styles: {
           fontSize: 6.5,
-          cellPadding: 1,
+          cellPadding: 0.9,
           valign: 'middle',
           textColor: [30, 41, 59]
         },
@@ -626,16 +741,20 @@ const TeacherDashboard = () => {
             const rawVal = data.cell.raw;
             if (rawVal === 'A') {
               data.cell.styles.textColor = [225, 29, 72];
+              data.cell.styles.fillColor = [255, 241, 242];
               data.cell.styles.fontStyle = 'bold';
             } else if (rawVal === 'P') {
               data.cell.styles.textColor = [5, 150, 105];
+              data.cell.styles.fontStyle = 'bold';
             } else if (rawVal === 'L') {
               data.cell.styles.textColor = [217, 119, 6];
+              data.cell.styles.fillColor = [254, 243, 199];
+              data.cell.styles.fontStyle = 'bold';
             } else if (rawVal === 'Sun') {
               data.cell.styles.textColor = [148, 163, 184];
               data.cell.styles.fillColor = [241, 245, 249];
             } else if (rawVal === 'H') {
-              data.cell.styles.textColor = [217, 119, 6];
+              data.cell.styles.textColor = [180, 83, 9];
               data.cell.styles.fillColor = [254, 243, 199];
               data.cell.styles.fontStyle = 'bold';
             }
@@ -648,12 +767,68 @@ const TeacherDashboard = () => {
                 data.cell.styles.fontStyle = 'bold';
               } else {
                 data.cell.styles.textColor = [5, 150, 105];
+                data.cell.styles.fillColor = [236, 253, 245];
+                data.cell.styles.fontStyle = 'bold';
               }
             }
           }
         },
-        margin: { left: 14, right: 14, bottom: 26 }
+        margin: { left: 14, right: 14, bottom: 28 }
       });
+
+      // --- SIGNATURE BLOCKS AT THE BOTTOM OF THE PAGE ---
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+
+        // Position signatures on the final page
+        if (i === totalPages) {
+          const signY = pageHeight - 16;
+          doc.setDrawColor(148, 163, 184);
+          doc.setLineWidth(0.4);
+
+          // 1. Faculty Member Signature (Left)
+          doc.line(18, signY, 78, signY);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor(30, 41, 59);
+          doc.text("Signature of Faculty In-Charge", 18, signY + 4);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(6.5);
+          doc.setTextColor(100, 116, 139);
+          doc.text(`Prof. ${storedUser?.name || 'Faculty Member'}`, 18, signY + 7.5);
+
+          // 2. HOD Verification (Center)
+          const midX = (pageWidth / 2) - 30;
+          doc.line(midX, signY, midX + 60, signY);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor(30, 41, 59);
+          doc.text("Verified by Head of Department", midX, signY + 4);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(6.5);
+          doc.setTextColor(100, 116, 139);
+          doc.text("Department Seal & Sign", midX, signY + 7.5);
+
+          // 3. Principal Seal & Signature (Right)
+          const rightX = pageWidth - 78;
+          doc.line(rightX, signY, rightX + 60, signY);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor(30, 41, 59);
+          doc.text("Principal / Head of Institution", rightX, signY + 4);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(6.5);
+          doc.setTextColor(100, 116, 139);
+          doc.text("Success Degree College", rightX, signY + 7.5);
+        }
+
+        // Page numbering
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Page ${i} of ${totalPages}`, pageWidth - 26, pageHeight - 5);
+      }
 
       const safeSubject = activeAssignment.subject.replace(/[^a-zA-Z0-9]/g, '_');
       doc.save(`Attendance_Register_${safeSubject}_${monthName}_${year}.pdf`);
@@ -723,7 +898,7 @@ const TeacherDashboard = () => {
           <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
           <div className="flex items-center gap-4 relative z-10">
-            <div className="w-13 h-13 rounded-2xl  from-indigo-500 via-indigo-600 to-violet-700 flex items-center justify-center shadow-bg-gradient-to-brlg shadow-indigo-500/25 text-white border border-white/20">
+            <div className="w-13 h-13 rounded-2xl bg-linear-to-br from-indigo-500 via-indigo-600 to-violet-700 flex items-center justify-center shadow-lg shadow-indigo-500/25 text-white border border-white/20">
               <GraduationCap size={26} />
             </div>
             <div>
@@ -745,14 +920,17 @@ const TeacherDashboard = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 relative z-10">
-            {/* Date Picker */}
-            <div className="flex items-center gap-2.5 bg-slate-950/80 border border-white/10 px-4 py-2 rounded-2xl text-xs md:text-sm shadow-inner hover:border-white/20 transition-colors">
+            {/* Mobile-Friendly Formatted Date Picker with native calendar overlay */}
+            <div className="relative flex items-center gap-2.5 bg-slate-950/80 border border-white/10 px-4 py-2 rounded-2xl text-xs md:text-sm shadow-inner hover:border-white/20 transition-colors">
               <Calendar size={15} className="text-indigo-400 shrink-0" />
+              <span className="text-white font-medium tracking-wide">
+                {formatDisplayDate(attendanceDate)}
+              </span>
               <input
                 type="date"
                 value={toStandardDateString(attendanceDate)}
                 onChange={(e) => setAttendanceDate(e.target.value)}
-                className="bg-transparent text-white font-medium focus:outline-none cursor-pointer text-xs md:text-sm appearance-none"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               />
             </div>
 
@@ -771,7 +949,7 @@ const TeacherDashboard = () => {
               onClick={downloadDetailedMonthlyReportPDF}
               disabled={generatingReport || !activeAssignment}
               title="Download Detailed Attendance Register (PDF)"
-              className="flex items-center gap-2 px-4 py-2  from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 bg-gradient-to-rhover:to-violet-500 text-white rounded-2xl text-xs font-bold transition-all shadow-md shadow-indigo-500/20 cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 bg-linear-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl text-xs font-bold transition-all shadow-md shadow-indigo-500/20 cursor-pointer disabled:opacity-50"
             >
               <Download size={14} />
               <span>{generatingReport ? "Generating..." : "Register PDF"}</span>
@@ -798,7 +976,7 @@ const TeacherDashboard = () => {
                 <div className="flex items-center gap-2">
                   <h4 className="font-extrabold text-base text-white">Institutional Holiday Notice</h4>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-400/30">
-                    {attendanceDate}
+                    {formatDisplayDate(attendanceDate)}
                   </span>
                 </div>
                 <p className="text-xs text-amber-300/90 mt-0.5">
@@ -988,7 +1166,7 @@ const TeacherDashboard = () => {
                     </span>
                   ) : isSavedForDate ? (
                     <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
-                      <Check size={12} /> Saved for {attendanceDate}
+                      <Check size={12} /> Saved for {formatDisplayDate(attendanceDate)}
                     </span>
                   ) : (
                     <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
@@ -1122,7 +1300,7 @@ const TeacherDashboard = () => {
                 {isDateLoading ? (
                   <div className="p-16 text-center text-slate-400 text-sm flex items-center justify-center gap-3">
                     <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                    Synchronizing attendance for {attendanceDate}...
+                    Synchronizing attendance for {formatDisplayDate(attendanceDate)}...
                   </div>
                 ) : (
                   <div className="divide-y divide-white/5 border border-white/10 rounded-2xl overflow-hidden bg-slate-950/60">

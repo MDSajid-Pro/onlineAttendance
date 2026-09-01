@@ -5,68 +5,69 @@ import {
   LayoutDashboard, 
   Users, 
   GraduationCap, 
-  BookOpen, 
   Search, 
-  UserPlus, 
   Trash2, 
   Layers, 
   UserCheck, 
   X, 
-  LogOut,
-  TrendingUp,
-  User,
-  Hash,
-  ArrowRight,
-  UserX,
-  MessageSquare,
-  Send,
-  Calendar,
-  Sparkles,
-  CheckCircle2,
-  AlertCircle,
-  Info,
-  Phone
+  UserX, 
+  MessageSquare, 
+  Send, 
+  Calendar, 
+  CheckCircle2, 
+  AlertCircle, 
+  Info, 
+  Phone, 
+  BellRing,
+  ClockAlert,
+  MessageCircle
 } from 'lucide-react';
 
-const COURSES = ['B.Sc', 'B.A', 'B.Com', 'BCA'];
-const SEMESTERS = [
-  '1st Semester',
-  '2nd Semester',
-  '3rd Semester',
-  '4th Semester',
-  '5th Semester',
-  '6th Semester'
-];
+// Formats 'YYYY-MM-DD' into readable 'DD/MM/YYYY' for mobile & desktop displays
+const formatDisplayDate = (isoDate) => {
+  if (!isoDate) return '';
+  const parts = String(isoDate).split('T')[0].split('-');
+  if (parts.length !== 3) return isoDate;
+  const [year, month, day] = parts;
+  return `${day}/${month}/${year}`;
+};
 
 const AdminDashboard = () => {
-  const { axios, setToken, setUser } = useAppContext();
+  const { axios } = useAppContext();
   const navigate = useNavigate();
 
   const [allocations, setAllocations] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [students, setStudents] = useState([]);
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Daily Absentees State
+  // Daily Date Selector State (standard ISO YYYY-MM-DD for backend consistency)
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Absentees Modal State
   const [absenteesList, setAbsenteesList] = useState([]);
   const [loadingAbsentees, setLoadingAbsentees] = useState(false);
   const [isAbsenteesModalOpen, setIsAbsenteesModalOpen] = useState(false);
   const [absenteeSearch, setAbsenteeSearch] = useState('');
-  
-  // Student Enrollment Modal State
-  const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
-  const [studentForm, setStudentForm] = useState({
-    fullName: '',
-    registerNo: '',
-    course: 'B.Sc',
-    semester: '1st Semester',
-    parentPhone: ''
-  });
-  const [submittingStudent, setSubmittingStudent] = useState(false);
 
-  // Custom Toast Notification State
+  // Faculty Reminder Modal State
+  const [isFacultyReminderModalOpen, setIsFacultyReminderModalOpen] = useState(false);
+  const [facultySearch, setFacultySearch] = useState('');
+
+  // Custom Message Composer Modal State
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+  const [customRecipient, setCustomRecipient] = useState({
+    name: '',
+    role: '',
+    phone: '',
+    subject: '',
+    context: ''
+  });
+  const [customMessage, setCustomMessage] = useState('');
+
+  // Toast State
   const [customToast, setCustomToast] = useState({
     visible: false,
     type: 'success',
@@ -82,19 +83,27 @@ const AdminDashboard = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // 1. Initial Load: Concurrent Fetch
+  // 1. Initial Load: Fetch Registry & Attendance Records
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [allocRes, teachersRes, studentsRes] = await Promise.all([
+      const [allocRes, teachersRes, studentsRes, attRes] = await Promise.all([
         axios.get('/api/teacher/all-allocations'),
         axios.get('/api/teacher'),
-        axios.get('/api/students/all')
+        axios.get('/api/students/all'),
+        axios.get('/api/attendance/history', { params: { date: selectedDate } }).catch(() => ({ data: [] }))
       ]);
 
       setAllocations(Array.isArray(allocRes.data) ? allocRes.data : []);
       setTeachers(Array.isArray(teachersRes.data) ? teachersRes.data : teachersRes.data?.teachers || []);
       setStudents(Array.isArray(studentsRes.data) ? studentsRes.data : studentsRes.data?.students || []);
+
+      const attLogs = Array.isArray(attRes.data?.attendances)
+        ? attRes.data.attendances
+        : Array.isArray(attRes.data)
+        ? attRes.data
+        : [];
+      setAttendanceRecords(attLogs);
     } catch {
       showCustomToast('error', 'Sync Failure', 'Failed to load dashboard data.');
     } finally {
@@ -104,20 +113,16 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     fetchData();
-  }, [axios]);
+  }, [axios, selectedDate]);
 
-  // 2. Fetch Daily Absentees with Strict Student-First Metadata Resolution
+  // 2. Fetch Absentees for Modal
   const fetchAbsenteesByDate = async (date) => {
     try {
       setLoadingAbsentees(true);
-      const { data } = await axios.get('/api/attendance/history', {
-        params: { date }
-      });
-
+      const { data } = await axios.get('/api/attendance/history', { params: { date } });
       const logs = Array.isArray(data.attendances) ? data.attendances : Array.isArray(data) ? data : [];
       const extractedAbsentees = [];
 
-      // Create a fast lookup map from the active student state
       const studentMap = {};
       students.forEach(st => {
         if (st._id) studentMap[String(st._id)] = st;
@@ -130,27 +135,18 @@ const AdminDashboard = () => {
           if (rec.status === 'Absent') {
             const rawStudent = rec.student || {};
             const studentId = typeof rawStudent === 'object' ? rawStudent._id : rawStudent;
-            
-            // Resolve from populated object or fall back to main directory lookup
             const matchedStudent = (typeof rawStudent === 'object' && rawStudent.fullName) 
               ? rawStudent 
               : (studentMap[String(studentId)] || {});
 
-            // Strict Priority: Student Schema > Assignment/Log Schema > Fallback
-            const resolvedCourse = matchedStudent.course || log.courseName || log.course || 'B.Sc';
-            const resolvedSemester = matchedStudent.semester || log.semester || '1st Semester';
-            const resolvedFullName = matchedStudent.fullName || matchedStudent.name || 'Unknown Student';
-            const resolvedRegisterNo = matchedStudent.registerNo || matchedStudent.rollNumber || 'N/A';
-            const resolvedParentPhone = (matchedStudent.parentPhone || matchedStudent.phone || '').trim();
-
             extractedAbsentees.push({
               _id: studentId || rec._id,
-              fullName: resolvedFullName,
-              registerNo: resolvedRegisterNo,
-              course: resolvedCourse,
-              semester: resolvedSemester,
+              fullName: matchedStudent.fullName || matchedStudent.name || 'Unknown Student',
+              registerNo: matchedStudent.registerNo || matchedStudent.rollNumber || 'N/A',
+              course: matchedStudent.course || log.courseName || log.course || 'B.Sc',
+              semester: matchedStudent.semester || log.semester || '1st Semester',
               subject,
-              parentPhone: resolvedParentPhone,
+              parentPhone: (matchedStudent.parentPhone || matchedStudent.phone || '').trim(),
               date
             });
           }
@@ -171,37 +167,37 @@ const AdminDashboard = () => {
     fetchAbsenteesByDate(selectedDate);
   };
 
-  // 3. Direct SMS Dispatch Actions
-  const handleNotifyParentSMS = (absentee) => {
-    const rawPhone = (absentee.parentPhone || '').replace(/\D/g, '');
-    if (!rawPhone) {
-      showCustomToast('error', 'Missing Number', `No parent contact registered for ${absentee.fullName}.`);
-      return;
-    }
+  // 3. Compute Pending Allocations (Who has NOT marked attendance)
+  const pendingAllocations = useMemo(() => {
+    return allocations.filter(alloc => {
+      const isMarked = attendanceRecords.some(att => {
+        const attTeacherId = String(att.teacher?._id || att.teacher || '');
+        const allocTeacherId = String(alloc.teacher?._id || alloc.teacher || '');
+        const sameTeacher = attTeacherId && allocTeacherId && attTeacherId === allocTeacherId;
 
-    const message = `Dear Parent, your ward ${absentee.fullName} (Reg: ${absentee.registerNo}) was marked ABSENT for ${absentee.subject} (${absentee.course} - ${absentee.semester}) on ${absentee.date} at Success Degree College.`;
+        const sameSubject = (att.subject || '').trim().toLowerCase() === (alloc.subject || '').trim().toLowerCase();
+        const sameCourse = (att.courseName || att.course || '').trim().toLowerCase() === (alloc.courseName || '').trim().toLowerCase();
+        const sameSemester = (att.semester || '').trim().toLowerCase() === (alloc.semester || '').trim().toLowerCase();
 
-    const smsUrl = `sms:${rawPhone}?body=${encodeURIComponent(message)}`;
-    window.open(smsUrl, '_self');
-    showCustomToast('info', 'Opening SMS App', `Composing alert to ${rawPhone}...`);
-  };
+        return (sameTeacher && sameSubject) || (sameSubject && sameCourse && sameSemester);
+      });
 
-  const handleNotifyAllParentsSMS = () => {
-    const withPhone = absenteesList.filter(a => a.parentPhone && a.parentPhone.replace(/\D/g, '').length >= 10);
-    if (withPhone.length === 0) {
-      showCustomToast('error', 'No Contacts Found', 'No valid parent mobile numbers available in the absentee list.');
-      return;
-    }
+      return !isMarked;
+    });
+  }, [allocations, attendanceRecords]);
 
-    const phoneList = withPhone.map(a => a.parentPhone.replace(/\D/g, '')).join(',');
-    const batchMessage = `Dear Parent, this is an official absence alert from Success Degree College for students marked absent on ${selectedDate}. Please contact the college administration for details.`;
+  // Filtered Pending Faculty
+  const filteredPending = useMemo(() => {
+    return pendingAllocations.filter(alloc => {
+      const teacherName = (alloc.teacher?.name || '').toLowerCase();
+      const subject = (alloc.subject || '').toLowerCase();
+      const course = (alloc.courseName || '').toLowerCase();
+      const q = facultySearch.toLowerCase();
+      return teacherName.includes(q) || subject.includes(q) || course.includes(q);
+    });
+  }, [pendingAllocations, facultySearch]);
 
-    const smsUrl = `sms:${phoneList}?body=${encodeURIComponent(batchMessage)}`;
-    window.open(smsUrl, '_self');
-    showCustomToast('success', 'Batch SMS Composed', `Dispatched alerts for ${withPhone.length} parents.`);
-  };
-
-  // Filtered Allocations based on search query
+  // Filtered Main Allocations
   const filteredAllocations = useMemo(() => {
     return allocations.filter(a => {
       const teacherName = (a.teacher?.name || '').toLowerCase();
@@ -212,69 +208,77 @@ const AdminDashboard = () => {
     });
   }, [allocations, searchQuery]);
 
-  // Filtered Absentees in Modal
+  // Filtered Absentees
   const filteredAbsentees = useMemo(() => {
     return absenteesList.filter(st => {
       const name = (st.fullName || '').toLowerCase();
       const reg = (st.registerNo || '').toLowerCase();
       const sub = (st.subject || '').toLowerCase();
-      const course = (st.course || '').toLowerCase();
-      const sem = (st.semester || '').toLowerCase();
       const q = absenteeSearch.toLowerCase();
-      return name.includes(q) || reg.includes(q) || sub.includes(q) || course.includes(q) || sem.includes(q);
+      return name.includes(q) || reg.includes(q) || sub.includes(q);
     });
   }, [absenteesList, absenteeSearch]);
 
-  // Handle Student Enrollment Submission
-  const handleStudentSubmit = async (e) => {
-    e.preventDefault();
-    if (!studentForm.fullName.trim() || !studentForm.registerNo.trim()) {
-      return showCustomToast('error', 'Validation Error', 'Please provide both name and register number.');
+  // 4. Custom Reminder / Message Dispatcher Trigger
+  const openCustomMessenger = (type, data) => {
+    if (type === 'teacher') {
+      const name = data.teacher?.name || 'Faculty Member';
+      const phone = data.teacher?.phone || '';
+      const defaultText = `Respected Prof. ${name}, kindly mark and submit the attendance record for ${data.subject} (${data.courseName} - ${data.semester}) for ${formatDisplayDate(selectedDate)} on the college portal.\n\n- Principal Desk, Success Degree College`;
+      setCustomRecipient({
+        name,
+        role: 'Faculty',
+        phone,
+        subject: data.subject,
+        context: `${data.courseName} - ${data.semester}`
+      });
+      setCustomMessage(defaultText);
+    } else {
+      const name = data.fullName;
+      const phone = data.parentPhone || '';
+      const defaultText = `Dear Parent, this is to notify that your ward ${name} (Reg No: ${data.registerNo}) was marked ABSENT for ${data.subject} on ${formatDisplayDate(data.date)}.\n\n- Success Degree College`;
+      setCustomRecipient({
+        name,
+        role: 'Parent / Ward',
+        phone,
+        subject: data.subject,
+        context: `${data.course} - ${data.semester}`
+      });
+      setCustomMessage(defaultText);
     }
-
-    setSubmittingStudent(true);
-    try {
-      const payload = {
-        fullName: studentForm.fullName.trim(),
-        registerNo: studentForm.registerNo.trim().toUpperCase(),
-        course: studentForm.course,
-        semester: studentForm.semester,
-        parentPhone: studentForm.parentPhone.trim()
-      };
-
-      const { data } = await axios.post('/api/students/add', payload);
-
-      if (data.success || data.student) {
-        showCustomToast('success', 'Student Enrolled', `Registered ${payload.fullName} into the database!`);
-        setStudentForm({
-          fullName: '',
-          registerNo: '',
-          course: 'B.Sc',
-          semester: '1st Semester',
-          parentPhone: ''
-        });
-        setIsStudentModalOpen(false);
-        fetchData();
-      } else {
-        showCustomToast('error', 'Registration Failed', data.message || 'Failed to add student.');
-      }
-    } catch (err) {
-      showCustomToast('error', 'Error', err.response?.data?.message || 'Error adding student record.');
-    } finally {
-      setSubmittingStudent(false);
-    }
+    setIsReminderModalOpen(true);
   };
 
-  // Delete Allocation Link
+  const handleSendCustomChannel = (channel) => {
+    const rawPhone = customRecipient.phone.replace(/\D/g, '');
+    if (!rawPhone || rawPhone.length < 10) {
+      showCustomToast('error', 'Invalid Phone', 'Valid 10-digit mobile number required.');
+      return;
+    }
+
+    const sanitizedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+
+    if (channel === 'whatsapp') {
+      const url = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(customMessage)}`;
+      window.open(url, '_blank');
+      showCustomToast('success', 'WhatsApp Dispatched', `Directed message to ${customRecipient.name}`);
+    } else {
+      const url = `sms:${rawPhone}?body=${encodeURIComponent(customMessage)}`;
+      window.open(url, '_self');
+      showCustomToast('info', 'SMS Client Opened', `Composed message for ${customRecipient.name}`);
+    }
+    setIsReminderModalOpen(false);
+  };
+
+  // 5. Delete Allocation
   const handleDeleteAllocation = async (id, subject) => {
     if (!window.confirm(`Are you sure you want to delete the allocation for "${subject}"?`)) return;
-
     try {
       await axios.delete(`/api/teacher/allocation/${id}`);
       setAllocations(prev => prev.filter(a => a._id !== id));
-      showCustomToast('success', 'Allocation Removed', `Deleted ${subject} batch link.`);
+      showCustomToast('success', 'Deleted', `Removed ${subject} link.`);
     } catch (err) {
-      showCustomToast('error', 'Delete Failed', err.response?.data?.message || 'Failed to delete allocation.');
+      showCustomToast('error', 'Delete Failed', err.response?.data?.message || 'Failed to remove.');
     }
   };
 
@@ -292,7 +296,7 @@ const AdminDashboard = () => {
   return (
     <div className="min-h-screen bg-[#07090e] text-slate-100 p-4 md:p-8 flex justify-center selection:bg-indigo-500/30 selection:text-indigo-200">
       
-      {/* Floating Custom Toast */}
+      {/* Toast Notification */}
       {customToast.visible && (
         <div className="fixed top-6 right-6 z-50 max-w-sm w-full animate-fadeIn transition-all">
           <div className={`p-4 rounded-2xl backdrop-blur-2xl border shadow-2xl flex items-start gap-3.5 ${
@@ -315,7 +319,7 @@ const AdminDashboard = () => {
             </div>
             <button 
               onClick={() => setCustomToast(prev => ({ ...prev, visible: false }))}
-              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 cursor-pointer"
             >
               <X size={15} />
             </button>
@@ -325,7 +329,7 @@ const AdminDashboard = () => {
 
       <div className="w-full max-w-7xl space-y-8">
 
-        {/* Top Glass Navbar */}
+        {/* Top Navbar Header */}
         <header className="bg-slate-900/60 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-2xl">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-linear-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-indigo-500/20">
@@ -338,76 +342,94 @@ const AdminDashboard = () => {
                   Principal Desk
                 </span>
               </div>
-              <p className="text-slate-400 text-sm mt-0.5">Live Student Enrollment & Faculty Allocation Matrix</p>
+              <p className="text-slate-400 text-sm mt-0.5">Faculty Attendance Status & Direct Communications</p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* View Absentees Trigger Button */}
-            <button
-              onClick={openAbsenteesModal}
-              className="flex items-center gap-2 px-5 py-3 bg-linear-to-br from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-rose-500/25 transition-all cursor-pointer"
-            >
-              <UserX size={16} /> Daily Absentees & SMS Alerts
-            </button>
+            {/* Mobile-Friendly Formatted Date Selector with native picker overlay */}
+            <div className="relative flex items-center gap-2 bg-slate-950/80 border border-white/10 px-3.5 py-2.5 rounded-2xl text-xs hover:border-indigo-500/40 transition-colors">
+              <Calendar size={15} className="text-indigo-400 shrink-0" />
+              <span className="text-white font-medium tracking-wide">
+                {formatDisplayDate(selectedDate)}
+              </span>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              />
+            </div>
 
-            {/* Enroll Student Trigger */}
-            <button
-              onClick={() => setIsStudentModalOpen(true)}
-              className="flex items-center gap-2 px-5 py-3 bg-linear-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
-            >
-              <UserPlus size={16} /> Enroll Student
-            </button>
+            {/* Aligned Header Actions: Daily Absentees & Faculty Reminders */}
+            <div className="inline-flex items-center gap-2.5">
+              <button
+                onClick={openAbsenteesModal}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-linear-to-br from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-rose-500/25 transition-all cursor-pointer h-10"
+              >
+                <UserX size={16} />
+                <span>Daily Absentees</span>
+              </button>
+
+              <button
+                onClick={() => setIsFacultyReminderModalOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-linear-to-br from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-amber-500/25 transition-all cursor-pointer h-10"
+              >
+                <BellRing size={16} />
+                <span>Faculty Reminders</span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] bg-white/20 text-white font-mono leading-none">
+                  {pendingAllocations.length}
+                </span>
+              </button>
+            </div>
           </div>
         </header>
 
-        {/* Summary Stat Cards */}
+        {/* Summary Stats Overview */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <div className="bg-slate-900/40 border border-white/10 rounded-3xl p-5 space-y-2">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-bold uppercase tracking-wider">Total Students</span>
-              <GraduationCap size={18} className="text-blue-400" />
+              <span className="text-xs font-bold uppercase tracking-wider">Unmarked Classes</span>
+              <ClockAlert size={18} className="text-amber-400" />
             </div>
-            <p className="text-3xl font-extrabold text-white">{students.length}</p>
-            <span className="text-[11px] text-blue-400 font-medium">Registered in College</span>
+            <p className="text-3xl font-extrabold text-white">{pendingAllocations.length}</p>
+            <span className="text-[11px] text-amber-400 font-medium">Pending on {formatDisplayDate(selectedDate)}</span>
           </div>
 
           <div className="bg-slate-900/40 border border-white/10 rounded-3xl p-5 space-y-2">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-bold uppercase tracking-wider">Faculty Staff</span>
+              <span className="text-xs font-bold uppercase tracking-wider">Active Faculty</span>
               <UserCheck size={18} className="text-emerald-400" />
             </div>
             <p className="text-3xl font-extrabold text-white">{teachers.length}</p>
-            <span className="text-[11px] text-emerald-400 font-medium">Active Instructors</span>
+            <span className="text-[11px] text-emerald-400 font-medium">Staff Members</span>
           </div>
 
           <div className="bg-slate-900/40 border border-white/10 rounded-3xl p-5 space-y-2">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-bold uppercase tracking-wider">Allocated Batches</span>
+              <span className="text-xs font-bold uppercase tracking-wider">Total Allocated Batches</span>
               <Layers size={18} className="text-indigo-400" />
             </div>
             <p className="text-3xl font-extrabold text-white">{allocations.length}</p>
-            <span className="text-[11px] text-indigo-400 font-medium">Subject Links</span>
+            <span className="text-[11px] text-indigo-400 font-medium">Class Sessions</span>
           </div>
 
           <div className="bg-slate-900/40 border border-white/10 rounded-3xl p-5 space-y-2">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-bold uppercase tracking-wider">Coverage Rate</span>
-              <TrendingUp size={18} className="text-amber-400" />
+              <span className="text-xs font-bold uppercase tracking-wider">Enrolled Students</span>
+              <GraduationCap size={18} className="text-blue-400" />
             </div>
-            <p className="text-3xl font-extrabold text-white">
-              {allocations.length > 0 ? Math.round((allocations.reduce((acc, a) => acc + (a.students?.length || 0), 0) / (students.length || 1)) * 100) : 0}%
-            </p>
-            <span className="text-[11px] text-amber-400 font-medium">Roster Utilization</span>
+            <p className="text-3xl font-extrabold text-white">{students.length}</p>
+            <span className="text-[11px] text-blue-400 font-medium">Registered Database</span>
           </div>
         </div>
 
-        {/* Allocations Management Table */}
+        {/* ALL FACULTY ALLOCATIONS REGISTRY TABLE */}
         <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold text-white">Faculty Allocation Registry</h2>
-              <p className="text-slate-400 text-xs mt-0.5">Assigned subject sessions and enrolled student rosters.</p>
+              <h2 className="text-xl font-bold text-white">All Faculty Allocations Registry</h2>
+              <p className="text-slate-400 text-xs mt-0.5">Master roster of teacher assignments and student cohorts.</p>
             </div>
 
             <div className="relative w-full md:w-80">
@@ -475,7 +497,7 @@ const AdminDashboard = () => {
                       <td className="py-4 px-5 text-right">
                         <button
                           onClick={() => handleDeleteAllocation(a._id, a.subject)}
-                          className="p-2 hover:bg-rose-500/20 text-rose-400 rounded-xl transition-all cursor-pointer"
+                          className="p-2 hover:bg-rose-500/20 text-rose-400 rounded-xl transition-all cursor-pointer inline-flex items-center"
                           title="Delete Allocation"
                         >
                           <Trash2 size={16} />
@@ -489,12 +511,115 @@ const AdminDashboard = () => {
           </div>
         </section>
 
-        {/* MODAL 1: Daily Absentees & Direct SMS Notifications */}
+        {/* MODAL 1: FACULTY REMINDERS MODAL */}
+        {isFacultyReminderModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+            <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-4xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                    <BellRing size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <span>Faculty Attendance Reminders</span>
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                        {pendingAllocations.length} Pending
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">Classes where attendance has not been recorded for {formatDisplayDate(selectedDate)}.</p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setIsFacultyReminderModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="relative w-full sm:w-72">
+                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Search pending faculty or subject..."
+                    value={facultySearch}
+                    onChange={(e) => setFacultySearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-slate-950/80 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto border border-white/10 rounded-2xl bg-slate-950/40">
+                {filteredPending.length === 0 ? (
+                  <div className="py-16 text-center text-slate-500 text-xs space-y-1">
+                    <CheckCircle2 size={28} className="mx-auto text-emerald-400 opacity-60 mb-2" />
+                    <p className="font-semibold text-slate-300">All faculty members have submitted attendance!</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950/80 uppercase text-[10px] text-slate-400 tracking-wider sticky top-0 border-b border-white/10 z-10">
+                      <tr>
+                        <th className="py-3 px-4">Faculty Member</th>
+                        <th className="py-3 px-4">Subject</th>
+                        <th className="py-3 px-4">Course & Term</th>
+                        <th className="py-3 px-4">Phone Number</th>
+                        <th className="py-3 px-4 text-right">Dispatch</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {filteredPending.map(alloc => (
+                        <tr key={alloc._id} className="hover:bg-white/2">
+                          <td className="py-3 px-4 font-bold text-white">
+                            {alloc.teacher?.name || 'Unassigned Teacher'}
+                          </td>
+                          <td className="py-3 px-4 text-amber-300 font-medium">
+                            {alloc.subject}
+                          </td>
+                          <td className="py-3 px-4 text-slate-300">
+                            <span className="font-semibold text-white">{alloc.courseName}</span> &bull; <span className="text-indigo-400">{alloc.semester}</span>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-300">
+                            {alloc.teacher?.phone || <span className="text-slate-600">Not Provided</span>}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              onClick={() => openCustomMessenger('teacher', alloc)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer"
+                            >
+                              <Send size={12} />
+                              <span>Remind</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="pt-2 flex items-center justify-between text-xs text-slate-400">
+                <span>Displaying records for: <strong className="text-white font-mono">{formatDisplayDate(selectedDate)}</strong></span>
+                <button
+                  onClick={() => setIsFacultyReminderModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 2: DAILY ABSENTEES MODAL */}
         {isAbsenteesModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
             <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-4xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col">
               
-              {/* Modal Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
                 <div className="flex items-center gap-3">
                   <div className="w-11 h-11 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center font-bold">
@@ -507,69 +632,41 @@ const AdminDashboard = () => {
                         {absenteesList.length} Absent
                       </span>
                     </h3>
-                    <p className="text-xs text-slate-400">Review absentees and trigger parent text alerts.</p>
+                    <p className="text-xs text-slate-400">Review student absentees and trigger parental text alerts.</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  {/* Date Selector */}
-                  <div className="flex items-center gap-2 bg-slate-950/90 border border-white/10 px-3 py-1.5 rounded-xl text-xs">
-                    <Calendar size={14} className="text-rose-400" />
-                    <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => {
-                        setSelectedDate(e.target.value);
-                        fetchAbsenteesByDate(e.target.value);
-                      }}
-                      className="bg-transparent text-white font-medium focus:outline-none cursor-pointer"
-                    />
-                  </div>
-
-                  <button 
-                    onClick={() => setIsAbsenteesModalOpen(false)}
-                    className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
+                <button 
+                  onClick={() => setIsAbsenteesModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
               </div>
 
-              {/* Action & Filter Bar */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="relative w-full sm:w-72">
                   <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                   <input
                     type="text"
-                    placeholder="Search by student, register, or course..."
+                    placeholder="Search absentee or subject..."
                     value={absenteeSearch}
                     onChange={(e) => setAbsenteeSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 bg-slate-950/80 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:border-rose-500 focus:outline-none"
                   />
                 </div>
-
-                {absenteesList.length > 0 && (
-                  <button
-                    onClick={handleNotifyAllParentsSMS}
-                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-linear-to-br from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
-                  >
-                    <Send size={14} /> Send SMS to All Parents
-                  </button>
-                )}
               </div>
 
-              {/* Absentees Scrollable Table */}
               <div className="flex-1 overflow-y-auto border border-white/10 rounded-2xl bg-slate-950/40">
                 {loadingAbsentees ? (
                   <div className="py-16 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
                     <div className="w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
-                    Checking attendance rolls for {selectedDate}...
+                    Checking attendance records for {formatDisplayDate(selectedDate)}...
                   </div>
                 ) : filteredAbsentees.length === 0 ? (
                   <div className="py-16 text-center text-slate-500 text-xs space-y-1">
                     <CheckCircle2 size={28} className="mx-auto text-emerald-400 opacity-60 mb-2" />
                     <p className="font-semibold text-slate-300">No absentees logged for this date.</p>
-                    <p>All students present or no lectures recorded.</p>
                   </div>
                 ) : (
                   <table className="w-full text-left text-xs">
@@ -577,45 +674,32 @@ const AdminDashboard = () => {
                       <tr>
                         <th className="py-3 px-4">Student</th>
                         <th className="py-3 px-4">Register No</th>
-                        <th className="py-3 px-4">Enrolled Course & Term</th>
+                        <th className="py-3 px-4">Class & Term</th>
                         <th className="py-3 px-4">Subject</th>
                         <th className="py-3 px-4">Parent Mobile</th>
-                        <th className="py-3 px-4 text-right">Direct Action</th>
+                        <th className="py-3 px-4 text-right">Direct Messaging</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {filteredAbsentees.map((st, idx) => (
                         <tr key={`${st._id}-${idx}`} className="hover:bg-white/2">
-                          <td className="py-3 px-4 font-bold text-white">
-                            {st.fullName}
-                          </td>
-                          <td className="py-3 px-4 font-mono text-indigo-300">
-                            {st.registerNo}
-                          </td>
+                          <td className="py-3 px-4 font-bold text-white">{st.fullName}</td>
+                          <td className="py-3 px-4 font-mono text-indigo-300">{st.registerNo}</td>
                           <td className="py-3 px-4 text-slate-300">
                             <span className="font-semibold text-white">{st.course}</span> &bull; <span className="text-indigo-400 font-medium">{st.semester}</span>
                           </td>
-                          <td className="py-3 px-4 text-rose-300 font-medium">
-                            {st.subject}
-                          </td>
+                          <td className="py-3 px-4 text-rose-300 font-medium">{st.subject}</td>
                           <td className="py-3 px-4 font-mono text-slate-300">
-                            {st.parentPhone ? (
-                              <span className="flex items-center gap-1">
-                                <Phone size={11} className="text-slate-500" />
-                                {st.parentPhone}
-                              </span>
-                            ) : (
-                              <span className="text-slate-600">Not Provided</span>
-                            )}
+                            {st.parentPhone || <span className="text-slate-600">Not Provided</span>}
                           </td>
                           <td className="py-3 px-4 text-right">
                             <button
-                              onClick={() => handleNotifyParentSMS(st)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition-all cursor-pointer"
-                              title="Send Parent Text SMS"
+                              onClick={() => openCustomMessenger('student', st)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer"
+                              title="Custom Message via WhatsApp/SMS"
                             >
-                              <MessageSquare size={13} className="text-indigo-400" />
-                              <span>Send Text SMS</span>
+                              <MessageSquare size={13} />
+                              <span>Message</span>
                             </button>
                           </td>
                         </tr>
@@ -625,9 +709,8 @@ const AdminDashboard = () => {
                 )}
               </div>
 
-              {/* Modal Footer */}
               <div className="pt-2 flex items-center justify-between text-xs text-slate-400">
-                <span>Showing records for: <strong className="text-white font-mono">{selectedDate}</strong></span>
+                <span>Displaying records for: <strong className="text-white font-mono">{formatDisplayDate(selectedDate)}</strong></span>
                 <button
                   onClick={() => setIsAbsenteesModalOpen(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold cursor-pointer"
@@ -640,128 +723,74 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* MODAL 2: Add New Student Record */}
-        {isStudentModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-            <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl relative">
-              
-              <div className="flex items-center justify-between pb-4 border-b border-white/10">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold">
-                    <UserPlus size={20} />
+        {/* MODAL 3: CUSTOM MESSAGE DISPATCHER (WHATSAPP & SMS) */}
+        {isReminderModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+            <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <MessageSquare size={20} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white">Enroll New Student</h3>
-                    <p className="text-xs text-slate-400">Add an academic record to the student database.</p>
+                    <h3 className="text-base font-bold text-white">Dispatch Custom Message</h3>
+                    <p className="text-xs text-slate-400">Send notification via WhatsApp or direct SMS</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setIsStudentModalOpen(false)}
-                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 cursor-pointer"
+                <button
+                  onClick={() => setIsReminderModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleStudentSubmit} className="space-y-4">
-                
-                {/* Full Name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <User size={14} className="text-indigo-400" /> Full Name
-                  </label>
+              <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-3.5 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Recipient:</span>
+                  <span className="font-semibold text-white">{customRecipient.name} ({customRecipient.role})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Class / Subject:</span>
+                  <span className="text-indigo-300 font-mono">{customRecipient.subject} &bull; {customRecipient.context}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-white/5">
+                  <span className="text-slate-400">Phone Number:</span>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Mohammed Sajid"
-                    value={studentForm.fullName}
-                    onChange={e => setStudentForm({ ...studentForm, fullName: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-all"
+                    value={customRecipient.phone}
+                    onChange={(e) => setCustomRecipient(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="Enter 10-digit number"
+                    className="bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1 text-right text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
+              </div>
 
-                {/* Register Number */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Hash size={14} className="text-indigo-400" /> Register / Roll Number
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. U15CS24S001"
-                    value={studentForm.registerNo}
-                    onChange={e => setStudentForm({ ...studentForm, registerNo: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm font-mono placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-all"
-                  />
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Custom Message Text</label>
+                <textarea
+                  rows={5}
+                  value={customMessage}
+                  onChange={(e) => setCustomMessage(e.target.value)}
+                  placeholder="Type your custom notification here..."
+                  className="w-full p-3.5 bg-slate-950/90 border border-white/10 rounded-2xl text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none resize-none font-sans leading-relaxed"
+                />
+              </div>
 
-                {/* Parent Phone Number */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Phone size={14} className="text-emerald-400" /> Parent Mobile Number (for SMS Alerts)
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="e.g. 9876543210"
-                    value={studentForm.parentPhone}
-                    onChange={e => setStudentForm({ ...studentForm, parentPhone: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm font-mono placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-all"
-                  />
-                </div>
-
-                {/* Course Stream */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <GraduationCap size={14} className="text-indigo-400" /> Degree Program
-                  </label>
-                  <select
-                    value={studentForm.course}
-                    onChange={e => setStudentForm({ ...studentForm, course: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm focus:border-indigo-500 focus:outline-none cursor-pointer transition-all"
-                  >
-                    {COURSES.map(c => <option key={c} value={c} className="bg-slate-900">{c}</option>)}
-                  </select>
-                </div>
-
-                {/* Academic Semester */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Layers size={14} className="text-indigo-400" /> Academic Semester
-                  </label>
-                  <select
-                    value={studentForm.semester}
-                    onChange={e => setStudentForm({ ...studentForm, semester: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-950/80 border border-white/10 rounded-2xl text-white text-sm focus:border-indigo-500 focus:outline-none cursor-pointer transition-all"
-                  >
-                    {SEMESTERS.map(s => <option key={s} value={s} className="bg-slate-900">{s}</option>)}
-                  </select>
-                </div>
-
-                {/* Submit Actions */}
-                <div className="pt-4 flex items-center justify-end gap-3 border-t border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setIsStudentModalOpen(false)}
-                    className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submittingStudent}
-                    className="px-6 py-3 bg-linear-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {submittingStudent ? "Registering..." : (
-                      <>
-                        <span>Add Student</span>
-                        <ArrowRight size={15} />
-                      </>
-                    )}
-                  </button>
-                </div>
-
-              </form>
-
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  onClick={() => handleSendCustomChannel('whatsapp')}
+                  className="flex items-center justify-center gap-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
+                >
+                  <MessageCircle size={16} /> Send via WhatsApp
+                </button>
+                <button
+                  onClick={() => handleSendCustomChannel('sms')}
+                  className="flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+                >
+                  <Send size={15} /> Send via Direct SMS
+                </button>
+              </div>
             </div>
           </div>
         )}
