@@ -20,10 +20,13 @@ import {
   Phone, 
   BellRing,
   ClockAlert,
-  MessageCircle
+  MessageCircle,
+  Lock,
+  ShieldCheck,
+  Share2
 } from 'lucide-react';
 
-// Formats 'YYYY-MM-DD' into readable 'DD/MM/YYYY' for mobile & desktop displays
+// Formats 'YYYY-MM-DD' into readable 'DD/MM/YYYY'
 const formatDisplayDate = (isoDate) => {
   if (!isoDate) return '';
   const parts = String(isoDate).split('T')[0].split('-');
@@ -43,7 +46,7 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Daily Date Selector State (standard ISO YYYY-MM-DD for backend consistency)
+  // Daily Date Selector State
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Absentees Modal State
@@ -56,16 +59,17 @@ const AdminDashboard = () => {
   const [isFacultyReminderModalOpen, setIsFacultyReminderModalOpen] = useState(false);
   const [facultySearch, setFacultySearch] = useState('');
 
-  // Custom Message Composer Modal State
+  // Strict Message Dispatcher Modal State
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [customRecipient, setCustomRecipient] = useState({
     name: '',
     role: '',
     phone: '',
     subject: '',
-    context: ''
+    context: '',
+    registerNo: ''
   });
-  const [customMessage, setCustomMessage] = useState('');
+  const [strictMessage, setStrictMessage] = useState('');
 
   // Toast State
   const [customToast, setCustomToast] = useState({
@@ -83,7 +87,7 @@ const AdminDashboard = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // 1. Initial Load: Fetch Registry & Attendance Records
+  // 1. Initial Load
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -115,7 +119,7 @@ const AdminDashboard = () => {
     fetchData();
   }, [axios, selectedDate]);
 
-  // 2. Fetch Absentees for Modal
+  // 2. Fetch Absentees
   const fetchAbsenteesByDate = async (date) => {
     try {
       setLoadingAbsentees(true);
@@ -167,7 +171,7 @@ const AdminDashboard = () => {
     fetchAbsenteesByDate(selectedDate);
   };
 
-  // 3. Compute Pending Allocations (Who has NOT marked attendance)
+  // 3. Compute Pending Allocations
   const pendingAllocations = useMemo(() => {
     return allocations.filter(alloc => {
       const isMarked = attendanceRecords.some(att => {
@@ -186,7 +190,7 @@ const AdminDashboard = () => {
     });
   }, [allocations, attendanceRecords]);
 
-  // Filtered Pending Faculty
+  // Filters
   const filteredPending = useMemo(() => {
     return pendingAllocations.filter(alloc => {
       const teacherName = (alloc.teacher?.name || '').toLowerCase();
@@ -197,7 +201,6 @@ const AdminDashboard = () => {
     });
   }, [pendingAllocations, facultySearch]);
 
-  // Filtered Main Allocations
   const filteredAllocations = useMemo(() => {
     return allocations.filter(a => {
       const teacherName = (a.teacher?.name || '').toLowerCase();
@@ -208,7 +211,6 @@ const AdminDashboard = () => {
     });
   }, [allocations, searchQuery]);
 
-  // Filtered Absentees
   const filteredAbsentees = useMemo(() => {
     return absenteesList.filter(st => {
       const name = (st.fullName || '').toLowerCase();
@@ -219,58 +221,103 @@ const AdminDashboard = () => {
     });
   }, [absenteesList, absenteeSearch]);
 
-  // 4. Custom Reminder / Message Dispatcher Trigger
+  // 4. Strict Official Message Templates
   const openCustomMessenger = (type, data) => {
+    const formattedDate = formatDisplayDate(type === 'teacher' ? selectedDate : data.date);
+
     if (type === 'teacher') {
       const name = data.teacher?.name || 'Faculty Member';
-      const phone = data.teacher?.phone || '';
-      const defaultText = `Respected Prof. ${name}, kindly mark and submit the attendance record for ${data.subject} (${data.courseName} - ${data.semester}) for ${formatDisplayDate(selectedDate)} on the college portal.\n\n- Principal Desk, Success Degree College`;
+      const phone = (data.teacher?.phone || '').trim();
+
+      const strictNotice = 
+`[OFFICIAL NOTIFICATION: ATTENDANCE SUBMISSION]
+Success Degree College, Basavakalyan
+
+Respected Prof. ${name},
+This is an urgent reminder that attendance has not yet been marked for:
+- Subject: ${data.subject}
+- Class: ${data.courseName} (${data.semester})
+- Date: ${formattedDate}
+
+Please log in to the faculty portal and submit the verified roll call immediately to maintain academic compliance.
+
+Regards,
+Office of the Principal
+Success Degree College`;
+
       setCustomRecipient({
         name,
-        role: 'Faculty',
+        role: 'Faculty Member',
         phone,
         subject: data.subject,
-        context: `${data.courseName} - ${data.semester}`
+        context: `${data.courseName} - ${data.semester}`,
+        registerNo: ''
       });
-      setCustomMessage(defaultText);
+      setStrictMessage(strictNotice);
     } else {
       const name = data.fullName;
-      const phone = data.parentPhone || '';
-      const defaultText = `Dear Parent, this is to notify that your ward ${name} (Reg No: ${data.registerNo}) was marked ABSENT for ${data.subject} on ${formatDisplayDate(data.date)}.\n\n- Success Degree College`;
+      const phone = (data.parentPhone || '').trim();
+
+      const strictNotice = 
+`[OFFICIAL PARENTAL ALERT: ABSENCE RECORD]
+Success Degree College, Basavakalyan
+
+Dear Parent/Guardian,
+This is to formally notify you that your ward ${name} has been recorded ABSENT from scheduled lectures:
+- Student: ${name}
+- Reg No: ${data.registerNo}
+- Class: ${data.course} (${data.semester})
+- Subject: ${data.subject}
+- Date: ${formattedDate}
+
+Regular attendance is mandatory for semester university examination eligibility. Kindly contact the department if this absence was unexcused.
+
+Office of Academic Affairs
+Success Degree College`;
+
       setCustomRecipient({
         name,
-        role: 'Parent / Ward',
+        role: 'Parent / Guardian',
         phone,
         subject: data.subject,
-        context: `${data.course} - ${data.semester}`
+        context: `${data.course} - ${data.semester}`,
+        registerNo: data.registerNo
       });
-      setCustomMessage(defaultText);
+      setStrictMessage(strictNotice);
     }
     setIsReminderModalOpen(true);
   };
 
-  const handleSendCustomChannel = (channel) => {
-    const rawPhone = customRecipient.phone.replace(/\D/g, '');
-    if (!rawPhone || rawPhone.length < 10) {
-      showCustomToast('error', 'Invalid Phone', 'Valid 10-digit mobile number required.');
-      return;
-    }
-
-    const sanitizedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+  // 5. Channel Dispatch: Direct or Contact Picker Fallback
+  const handleSendStrictChannel = (channel) => {
+    const rawPhone = (customRecipient.phone || '').replace(/\D/g, '');
+    const hasValidPhone = rawPhone.length >= 10;
+    const encodedText = encodeURIComponent(strictMessage);
 
     if (channel === 'whatsapp') {
-      const url = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(customMessage)}`;
-      window.open(url, '_blank');
-      showCustomToast('success', 'WhatsApp Dispatched', `Directed message to ${customRecipient.name}`);
+      if (hasValidPhone) {
+        const sanitizedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+        window.open(`https://wa.me/${sanitizedPhone}?text=${encodedText}`, '_blank');
+        showCustomToast('success', 'Dispatched', `WhatsApp directed to ${customRecipient.name}`);
+      } else {
+        // Fallback: Opens WhatsApp chat chooser with text pre-filled
+        window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
+        showCustomToast('info', 'Choose Contact', 'No number registered. Select contact in WhatsApp.');
+      }
     } else {
-      const url = `sms:${rawPhone}?body=${encodeURIComponent(customMessage)}`;
-      window.open(url, '_self');
-      showCustomToast('info', 'SMS Client Opened', `Composed message for ${customRecipient.name}`);
+      if (hasValidPhone) {
+        window.open(`sms:${rawPhone}?body=${encodedText}`, '_self');
+        showCustomToast('info', 'SMS Prepared', `SMS opened for ${customRecipient.name}`);
+      } else {
+        // Fallback: Opens SMS app with empty recipient and text pre-filled
+        window.open(`sms:?body=${encodedText}`, '_self');
+        showCustomToast('info', 'Choose Contact', 'No number registered. Select recipient in SMS app.');
+      }
     }
     setIsReminderModalOpen(false);
   };
 
-  // 5. Delete Allocation
+  // 6. Delete Allocation
   const handleDeleteAllocation = async (id, subject) => {
     if (!window.confirm(`Are you sure you want to delete the allocation for "${subject}"?`)) return;
     try {
@@ -347,7 +394,6 @@ const AdminDashboard = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Mobile-Friendly Formatted Date Selector with native picker overlay */}
             <div className="relative flex items-center gap-2 bg-slate-950/80 border border-white/10 px-3.5 py-2.5 rounded-2xl text-xs hover:border-indigo-500/40 transition-colors">
               <Calendar size={15} className="text-indigo-400 shrink-0" />
               <span className="text-white font-medium tracking-wide">
@@ -361,7 +407,6 @@ const AdminDashboard = () => {
               />
             </div>
 
-            {/* Aligned Header Actions: Daily Absentees & Faculty Reminders */}
             <div className="inline-flex items-center gap-2.5">
               <button
                 onClick={openAbsenteesModal}
@@ -385,7 +430,7 @@ const AdminDashboard = () => {
           </div>
         </header>
 
-        {/* Summary Stats Overview */}
+        {/* Summary Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <div className="bg-slate-900/40 border border-white/10 rounded-3xl p-5 space-y-2">
             <div className="flex items-center justify-between text-slate-400">
@@ -424,7 +469,7 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* ALL FACULTY ALLOCATIONS REGISTRY TABLE */}
+        {/* Allocations Registry Table */}
         <section className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
@@ -511,7 +556,7 @@ const AdminDashboard = () => {
           </div>
         </section>
 
-        {/* MODAL 1: FACULTY REMINDERS MODAL */}
+        {/* MODAL 1: FACULTY REMINDERS */}
         {isFacultyReminderModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
             <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-4xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col">
@@ -566,8 +611,8 @@ const AdminDashboard = () => {
                         <th className="py-3 px-4">Faculty Member</th>
                         <th className="py-3 px-4">Subject</th>
                         <th className="py-3 px-4">Course & Term</th>
-                        <th className="py-3 px-4">Phone Number</th>
-                        <th className="py-3 px-4 text-right">Dispatch</th>
+                        <th className="py-3 px-4">Registered Contact</th>
+                        <th className="py-3 px-4 text-right">Dispatch Notice</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -582,8 +627,12 @@ const AdminDashboard = () => {
                           <td className="py-3 px-4 text-slate-300">
                             <span className="font-semibold text-white">{alloc.courseName}</span> &bull; <span className="text-indigo-400">{alloc.semester}</span>
                           </td>
-                          <td className="py-3 px-4 font-mono text-slate-300">
-                            {alloc.teacher?.phone || <span className="text-slate-600">Not Provided</span>}
+                          <td className="py-3 px-4 font-mono">
+                            {alloc.teacher?.phone ? (
+                              <span className="text-slate-300">{alloc.teacher.phone}</span>
+                            ) : (
+                              <span className="text-rose-400/80 text-[11px] font-sans italic">Not registered</span>
+                            )}
                           </td>
                           <td className="py-3 px-4 text-right">
                             <button
@@ -591,7 +640,7 @@ const AdminDashboard = () => {
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer"
                             >
                               <Send size={12} />
-                              <span>Remind</span>
+                              <span>Notify</span>
                             </button>
                           </td>
                         </tr>
@@ -615,7 +664,7 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* MODAL 2: DAILY ABSENTEES MODAL */}
+        {/* MODAL 2: DAILY ABSENTEES */}
         {isAbsenteesModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
             <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-4xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col">
@@ -632,7 +681,7 @@ const AdminDashboard = () => {
                         {absenteesList.length} Absent
                       </span>
                     </h3>
-                    <p className="text-xs text-slate-400">Review student absentees and trigger parental text alerts.</p>
+                    <p className="text-xs text-slate-400">Review student absentees and trigger official parental alerts.</p>
                   </div>
                 </div>
 
@@ -677,7 +726,7 @@ const AdminDashboard = () => {
                         <th className="py-3 px-4">Class & Term</th>
                         <th className="py-3 px-4">Subject</th>
                         <th className="py-3 px-4">Parent Mobile</th>
-                        <th className="py-3 px-4 text-right">Direct Messaging</th>
+                        <th className="py-3 px-4 text-right">Official Alert</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -689,17 +738,21 @@ const AdminDashboard = () => {
                             <span className="font-semibold text-white">{st.course}</span> &bull; <span className="text-indigo-400 font-medium">{st.semester}</span>
                           </td>
                           <td className="py-3 px-4 text-rose-300 font-medium">{st.subject}</td>
-                          <td className="py-3 px-4 font-mono text-slate-300">
-                            {st.parentPhone || <span className="text-slate-600">Not Provided</span>}
+                          <td className="py-3 px-4 font-mono">
+                            {st.parentPhone ? (
+                              <span className="text-slate-300">{st.parentPhone}</span>
+                            ) : (
+                              <span className="text-rose-400/80 text-[11px] font-sans italic">Not registered</span>
+                            )}
                           </td>
                           <td className="py-3 px-4 text-right">
                             <button
                               onClick={() => openCustomMessenger('student', st)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer"
-                              title="Custom Message via WhatsApp/SMS"
+                              title="Send Official Parental Alert"
                             >
                               <MessageSquare size={13} />
-                              <span>Message</span>
+                              <span>Notify</span>
                             </button>
                           </td>
                         </tr>
@@ -723,18 +776,20 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* MODAL 3: CUSTOM MESSAGE DISPATCHER (WHATSAPP & SMS) */}
+        {/* MODAL 3: STRICT OFFICIAL MESSAGE DISPATCHER */}
         {isReminderModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
             <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative">
+              
+              {/* Modal Header */}
               <div className="flex items-center justify-between pb-3 border-b border-white/10">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <MessageSquare size={20} />
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                    <ShieldCheck size={20} />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-white">Dispatch Custom Message</h3>
-                    <p className="text-xs text-slate-400">Send notification via WhatsApp or direct SMS</p>
+                    <h3 className="text-base font-bold text-white">Official Institutional Notice</h3>
+                    <p className="text-xs text-slate-400">Standardized compliance dispatch</p>
                   </div>
                 </div>
                 <button
@@ -745,52 +800,81 @@ const AdminDashboard = () => {
                 </button>
               </div>
 
-              <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-3.5 text-xs space-y-1.5">
-                <div className="flex justify-between">
+              {/* Recipient Roster Info */}
+              <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-4 text-xs space-y-2">
+                <div className="flex justify-between items-center">
                   <span className="text-slate-400">Recipient:</span>
-                  <span className="font-semibold text-white">{customRecipient.name} ({customRecipient.role})</span>
+                  <span className="font-semibold text-white">{customRecipient.name} <span className="text-slate-400 font-normal">({customRecipient.role})</span></span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Class / Subject:</span>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Course / Unit:</span>
                   <span className="text-indigo-300 font-mono">{customRecipient.subject} &bull; {customRecipient.context}</span>
                 </div>
-                <div className="flex justify-between items-center pt-1 border-t border-white/5">
-                  <span className="text-slate-400">Phone Number:</span>
-                  <input
-                    type="text"
-                    value={customRecipient.phone}
-                    onChange={(e) => setCustomRecipient(prev => ({ ...prev, phone: e.target.value }))}
-                    placeholder="Enter 10-digit number"
-                    className="bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1 text-right text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
-                  />
+
+                {customRecipient.registerNo && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Roll / Reg No:</span>
+                    <span className="text-indigo-300 font-mono">{customRecipient.registerNo}</span>
+                  </div>
+                )}
+
+                {/* Registered Contact Status */}
+                <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                  <span className="text-slate-400 flex items-center gap-1.5">
+                    <Lock size={12} className="text-amber-400" />
+                    <span>Registered Contact:</span>
+                  </span>
+                  {customRecipient.phone ? (
+                    <span className="font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md font-semibold">
+                      +91 {customRecipient.phone.replace(/\D/g, '').slice(-10)}
+                    </span>
+                  ) : (
+                    <span className="text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md font-medium text-[11px] flex items-center gap-1">
+                      <Share2 size={11} /> Not registered &bull; Chooser fallback active
+                    </span>
+                  )}
                 </div>
               </div>
 
+              {/* Immutable Official Message Preview */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Custom Message Text</label>
-                <textarea
-                  rows={5}
-                  value={customMessage}
-                  onChange={(e) => setCustomMessage(e.target.value)}
-                  placeholder="Type your custom notification here..."
-                  className="w-full p-3.5 bg-slate-950/90 border border-white/10 rounded-2xl text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none resize-none font-sans leading-relaxed"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Lock size={12} className="text-slate-400" />
+                    <span>Official Template (Read-Only)</span>
+                  </label>
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider">Locked by Admin Policy</span>
+                </div>
+                <div className="w-full p-3.5 bg-slate-950/90 border border-white/10 rounded-2xl text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto border-l-2 border-l-indigo-500">
+                  {strictMessage}
+                </div>
               </div>
 
+              {/* Dispatch Options */}
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <button
-                  onClick={() => handleSendCustomChannel('whatsapp')}
+                  onClick={() => handleSendStrictChannel('whatsapp')}
                   className="flex items-center justify-center gap-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
                 >
-                  <MessageCircle size={16} /> Send via WhatsApp
+                  <MessageCircle size={16} />
+                  <span>{customRecipient.phone ? 'Send via WhatsApp' : 'Open WhatsApp Chooser'}</span>
                 </button>
                 <button
-                  onClick={() => handleSendCustomChannel('sms')}
+                  onClick={() => handleSendStrictChannel('sms')}
                   className="flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
                 >
-                  <Send size={15} /> Send via Direct SMS
+                  <Send size={15} />
+                  <span>{customRecipient.phone ? 'Send via SMS' : 'Open SMS Chooser'}</span>
                 </button>
               </div>
+
+              {!customRecipient.phone && (
+                <p className="text-[11px] text-center text-amber-300/80">
+                  Notice: No contact found in database. Clicking will open your app with the message pre-filled so you can select the recipient manually.
+                </p>
+              )}
+
             </div>
           </div>
         )}
