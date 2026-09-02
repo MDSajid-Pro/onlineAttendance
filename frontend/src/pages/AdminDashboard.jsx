@@ -171,19 +171,35 @@ const AdminDashboard = () => {
     fetchAbsenteesByDate(selectedDate);
   };
 
-  // 3. Compute Pending Allocations
+  // 3. Compute Pending Allocations per Class Session
   const pendingAllocations = useMemo(() => {
     return allocations.filter(alloc => {
+      const allocTeacherId = String(alloc.teacher?._id || alloc.teacher || '');
+      const allocSubject = (alloc.subject || '').trim().toLowerCase();
+      const allocCourse = (alloc.courseName || alloc.course || '').trim().toLowerCase();
+      const allocSemester = (alloc.semester || '').trim().toLowerCase();
+
       const isMarked = attendanceRecords.some(att => {
+        // Direct allocation ID match if provided by backend attendance schema
+        const attAllocId = String(att.allocation?._id || att.allocation || att.assignment?._id || att.assignment || '');
+        if (attAllocId && String(alloc._id) === attAllocId) {
+          return true;
+        }
+
         const attTeacherId = String(att.teacher?._id || att.teacher || '');
-        const allocTeacherId = String(alloc.teacher?._id || alloc.teacher || '');
-        const sameTeacher = attTeacherId && allocTeacherId && attTeacherId === allocTeacherId;
+        const attSubject = (att.subject || att.assignment?.subject || '').trim().toLowerCase();
+        const attCourse = (att.courseName || att.course || '').trim().toLowerCase();
+        const attSemester = (att.semester || '').trim().toLowerCase();
 
-        const sameSubject = (att.subject || '').trim().toLowerCase() === (alloc.subject || '').trim().toLowerCase();
-        const sameCourse = (att.courseName || att.course || '').trim().toLowerCase() === (alloc.courseName || '').trim().toLowerCase();
-        const sameSemester = (att.semester || '').trim().toLowerCase() === (alloc.semester || '').trim().toLowerCase();
+        // Check teacher match (optional if records only log courses)
+        const matchesTeacher = !attTeacherId || !allocTeacherId || attTeacherId === allocTeacherId;
 
-        return (sameTeacher && sameSubject) || (sameSubject && sameCourse && sameSemester);
+        // Must strictly match the specific class unit: subject, course, and semester
+        const matchesSubject = attSubject === allocSubject;
+        const matchesCourse = attCourse === allocCourse;
+        const matchesSemester = attSemester === allocSemester;
+
+        return matchesTeacher && matchesSubject && matchesCourse && matchesSemester;
       });
 
       return !isMarked;
