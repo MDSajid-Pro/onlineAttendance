@@ -21,7 +21,6 @@ import {
   UserCheck,
   AlertCircle,
   Palmtree,
-  FileText,
   CalendarOff,
   X,
   Info,
@@ -31,34 +30,6 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
-// Holiday master list (Format: MM-DD)
-const ACADEMIC_HOLIDAYS = {
-  '01-01': "New Year's Day",
-  '01-14': 'Makara Sankranti',
-  '01-26': 'Republic Day',
-  '03-08': 'Maha Shivaratri',
-  '03-29': 'Good Friday',
-  '04-09': 'Ugadi Festival',
-  '04-11': 'Eid-ul-Fitr (Ramzan)',
-  '04-21': 'Mahaveer Jayanti',
-  '05-01': 'May Day / Labour Day',
-  '05-10': 'Basava Jayanti',
-  '06-17': 'Bakrid (Eid al-Adha)',
-  '07-17': 'Muharram',
-  '08-15': 'Independence Day',
-  '08-26': 'Milad un-Nabi (Id-e-Milad)',
-  '09-07': 'Ganesh Chaturthi',
-  '10-02': 'Gandhi Jayanti',
-  '10-11': 'Ayudha Puja / Maha Navami',
-  '10-12': 'Vijayadashami (Dasara)',
-  '10-17': 'Maharshi Valmiki Jayanti',
-  '10-31': 'Naraka Chaturdashi',
-  '11-01': 'Kannada Rajyotsava',
-  '11-02': 'Deepavali (Balipadyami)',
-  '11-18': 'Kanakadasa Jayanti',
-  '12-25': 'Christmas Celebration'
-};
 
 // Formats 'YYYY-MM-DD' into readable 'DD/MM/YYYY' for mobile and desktop displays
 const formatDisplayDate = (inputDate) => {
@@ -74,7 +45,7 @@ const toStandardDateString = (inputDate) => {
   if (!inputDate) return new Date().toISOString().split('T')[0];
   if (typeof inputDate === 'string' && inputDate.includes('-')) {
     const parts = inputDate.split('-');
-    if (parts[0].length === 4) return inputDate;
+    if (parts[0].length === 4) return parts.slice(0, 3).join('-').split('T')[0];
   }
   const d = new Date(inputDate);
   if (isNaN(d.getTime())) {
@@ -121,6 +92,10 @@ const TeacherDashboard = () => {
   const [saving, setSaving] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
 
+  // Dynamic Backend Holidays State
+  const [academicHolidays, setAcademicHolidays] = useState([]);
+  const [holidaysLoading, setHolidaysLoading] = useState(false);
+
   // Special Class Override State for Holidays
   const [specialClassUnlocked, setSpecialClassUnlocked] = useState(false);
   const [isHolidayModalOpen, setIsHolidayModalOpen] = useState(false);
@@ -152,7 +127,24 @@ const TeacherDashboard = () => {
   const storedUser = storedUserRaw && storedUserRaw !== "undefined" ? JSON.parse(storedUserRaw) : null;
   const teacherId = storedUser?._id || storedUser?.id;
 
-  // 1. Detect Teacher Login Action
+  // 1. Fetch Dynamic Holidays from Database
+  const fetchHolidays = useCallback(async () => {
+    try {
+      setHolidaysLoading(true);
+      const res = await axios.get('/api/holidays');
+      setAcademicHolidays(res.data?.data || []);
+    } catch {
+      showCustomToast('error', 'Calendar Sync Warning', 'Unable to sync institutional holiday calendar.');
+    } finally {
+      setHolidaysLoading(false);
+    }
+  }, [axios, showCustomToast]);
+
+  useEffect(() => {
+    fetchHolidays();
+  }, [fetchHolidays]);
+
+  // 2. Detect Teacher Login Action
   useEffect(() => {
     const isJustLoggedIn = 
       location.state?.justLoggedIn || 
@@ -171,33 +163,47 @@ const TeacherDashboard = () => {
     }
   }, [location.state, storedUser, showCustomToast]);
 
-  // 2. Active Date Holiday Calculator
-  const holidayInfo = useMemo(() => {
-    if (!attendanceDate) return null;
-    const { month, day, dateObj } = parseDateParts(attendanceDate);
+  // Helper: Determine if a specific standard date string falls within a holiday interval
+  const getHolidayForDate = useCallback((targetDateStr) => {
+    if (!targetDateStr) return null;
+    const { dateObj } = parseDateParts(targetDateStr);
+    if (isNaN(dateObj.getTime())) return null;
 
-    if (isNaN(dateObj.getTime())) return { isHoliday: false, reason: null };
-
-    // Check Sunday
+    // Check Sunday first
     if (dateObj.getDay() === 0) {
-      return { isHoliday: true, reason: 'Sunday (Weekly Institutional Off)' };
+      return { isHoliday: true, reason: 'Sunday (Weekly Institutional Off)', type: 'Weekly Off' };
     }
 
-    // Check fixed holidays
-    const mmdd = `${month}-${day}`;
-    if (ACADEMIC_HOLIDAYS[mmdd]) {
-      return { isHoliday: true, reason: ACADEMIC_HOLIDAYS[mmdd] };
+    // Compare against backend records (inclusive date range check)
+    const match = academicHolidays.find((h) => {
+      const start = toStandardDateString(h.startDate);
+      const end = toStandardDateString(h.endDate);
+      return targetDateStr >= start && targetDateStr <= end;
+    });
+
+    if (match) {
+      return {
+        isHoliday: true,
+        reason: match.title,
+        type: match.type || 'Institutional',
+        description: match.description
+      };
     }
 
     return { isHoliday: false, reason: null };
-  }, [attendanceDate]);
+  }, [academicHolidays]);
+
+  // 3. Active Date Holiday Calculator (Derived dynamically)
+  const holidayInfo = useMemo(() => {
+    return getHolidayForDate(toStandardDateString(attendanceDate));
+  }, [attendanceDate, getHolidayForDate]);
 
   // Reset override whenever the selected date changes
   useEffect(() => {
     setSpecialClassUnlocked(false);
   }, [attendanceDate]);
 
-  // 3. Fetch Teacher Assigned Classes
+  // 4. Fetch Teacher Assigned Classes
   useEffect(() => {
     const fetchTeacherClasses = async () => {
       if (!teacherId) return;
@@ -259,7 +265,7 @@ const TeacherDashboard = () => {
     }
   }, [filteredAssignments, selectedAssignmentId]);
 
-  // 4. Fetch attendance state for active date
+  // 5. Fetch attendance state for active date
   const syncDateAttendance = useCallback(async () => {
     if (!activeAssignment?._id || !attendanceDate) return;
 
@@ -328,10 +334,10 @@ const TeacherDashboard = () => {
     });
 
     const rate = markedCount > 0 ? Math.round(((present + late * 0.5) / markedCount) * 100) : 0;
-    const uncompletedCount = total - markedCount;
-    const isAllMarked = total > 0 && uncompletedCount === 0;
+    const uncompleted = total - markedCount;
+    const allMarked = total > 0 && uncompleted === 0;
 
-    return { stats: { present, absent, late, rate }, uncompletedCount, isAllMarked };
+    return { stats: { present, absent, late, rate }, uncompletedCount: uncompleted, isAllMarked: allMarked };
   }, [attendanceRecords, activeAssignment, holidayInfo, specialClassUnlocked]);
 
   const filteredStudents = useMemo(() => {
@@ -431,7 +437,7 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Monthly Attendance PDF Generator with Color-Coded Academic Calendar Details & Signatures
+  // Monthly Attendance PDF Generator using Backend Holiday Database
   const downloadDetailedMonthlyReportPDF = async () => {
     if (!activeAssignment) return;
     setGeneratingReport(true);
@@ -464,19 +470,20 @@ const TeacherDashboard = () => {
         }
       });
 
-      // Compute Holidays & Sundays in this specific month
+      // Compute Holidays & Sundays in this month dynamically from academicHolidays state
       let sundaysCount = 0;
       let holidaysCount = 0;
       const holidaysInThisMonth = [];
 
       for (let d = 1; d <= totalDaysInMonth; d++) {
-        const dObj = new Date(year, monthNumber - 1, d);
-        const mmdd = `${month}-${String(d).padStart(2, '0')}`;
-        if (dObj.getDay() === 0) {
+        const dStr = `${year}-${month}-${String(d).padStart(2, '0')}`;
+        const dayCheck = getHolidayForDate(dStr);
+
+        if (new Date(year, monthNumber - 1, d).getDay() === 0) {
           sundaysCount++;
-        } else if (ACADEMIC_HOLIDAYS[mmdd]) {
+        } else if (dayCheck?.isHoliday) {
           holidaysCount++;
-          holidaysInThisMonth.push(`${String(d).padStart(2, '0')} ${monthName.slice(0, 3)}: ${ACADEMIC_HOLIDAYS[mmdd]}`);
+          holidaysInThisMonth.push(`${String(d).padStart(2, '0')} ${monthName.slice(0, 3)}: ${dayCheck.reason}`);
         }
       }
 
@@ -557,20 +564,20 @@ const TeacherDashboard = () => {
 
       doc.setFontSize(7);
       doc.setTextColor(71, 85, 105);
-      doc.setFont('Poppins', 'bold');
+      doc.setFont('helvetica', 'bold');
       doc.text("DEGREE & TERM:", 17, 34.5);
       doc.text("SUBJECT PAPER:", 85, 34.5);
       doc.text("FACULTY INSTRUCTOR:", 155, 34.5);
       doc.text("CALENDAR SUMMARY:", 225, 34.5);
 
-      doc.setFont('Poppins', 'normal');
+      doc.setFont('helvetica', 'normal');
       doc.setTextColor(15, 23, 42);
       doc.text(`${activeAssignment.courseName} — ${activeAssignment.semester}`, 17, 40);
       doc.text(`${activeAssignment.subject}`, 85, 40);
       doc.text(`${storedUser?.name || 'Faculty Member'} ${storedUser?.employeeId ? `(${storedUser.employeeId})` : ''}`, 155, 40);
       doc.text(`Classes Taken: ${logs.length} | Total Days: ${totalDaysInMonth}`, 225, 40);
 
-      // --- ROW 1: 5 Evenly Spaced Summary Badges (Including Total Holidays) ---
+      // Badges
       const badgeY = 46.5;
       const boxHeight = 6.5;
       const totalWidth = pageWidth - 28;
@@ -600,7 +607,7 @@ const TeacherDashboard = () => {
       doc.setDrawColor(251, 191, 36);
       doc.roundedRect(x3, badgeY, cardW, boxHeight, 1.2, 1.2, 'FD');
       doc.setTextColor(180, 83, 9);
-      doc.text(`Total Holidays: ${totalNonWorkingDays} (${holidaysCount} Gazetted)`, x3 + (cardW / 2), badgeY + 4.3, { align: 'center' });
+      doc.text(`Total Holidays: ${totalNonWorkingDays} (${holidaysCount} Listed)`, x3 + (cardW / 2), badgeY + 4.3, { align: 'center' });
 
       // 4. Batch Average
       const x4 = x3 + cardW + gap;
@@ -618,42 +625,37 @@ const TeacherDashboard = () => {
       doc.setTextColor(225, 29, 72);
       doc.text(`Shortage (<75%): ${shortageCount} Students`, x5 + (cardW / 2), badgeY + 4.3, { align: 'center' });
 
-      // --- ROW 2: Compact Legend Line ---
+      // Legend Line
       const legendY = 57.5;
       doc.setFontSize(6.8);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(51, 65, 85);
       doc.text("Legend:", 14, legendY);
 
-      // P
       doc.setFillColor(16, 185, 129);
       doc.rect(26, legendY - 2.5, 3.2, 3, 'F');
       doc.setTextColor(15, 23, 42);
       doc.setFont('helvetica', 'normal');
       doc.text("P: Present", 31, legendY);
 
-      // A
       doc.setFillColor(244, 63, 94);
       doc.rect(48, legendY - 2.5, 3.2, 3, 'F');
       doc.text("A: Absent", 53, legendY);
 
-      // L
       doc.setFillColor(245, 158, 11);
       doc.rect(70, legendY - 2.5, 3.2, 3, 'F');
       doc.text("L: Late (0.5)", 75, legendY);
 
-      // Sun
       doc.setFillColor(226, 232, 240);
       doc.rect(94, legendY - 2.5, 3.2, 3, 'F');
       doc.text("Sun: Weekly Off", 99, legendY);
 
-      // H
       doc.setFillColor(254, 243, 199);
       doc.setDrawColor(217, 119, 6);
       doc.rect(124, legendY - 2.5, 3.2, 3, 'FD');
       const holidaySummary = holidaysInThisMonth.length > 0
         ? `H: Holiday (${holidaysInThisMonth[0]}${holidaysInThisMonth.length > 1 ? ` +${holidaysInThisMonth.length - 1} more` : ''})`
-        : "H: Gazetted Holiday";
+        : "H: Institutional Holiday";
       doc.text(holidaySummary, 129, legendY);
 
       const dayHeaders = [];
@@ -679,14 +681,15 @@ const TeacherDashboard = () => {
         
         const dayCells = [];
         for (let d = 1; d <= totalDaysInMonth; d++) {
+          const dStr = `${year}-${month}-${String(d).padStart(2, '0')}`;
+          const dayHoliday = getHolidayForDate(dStr);
           const dObj = new Date(year, monthNumber - 1, d);
-          const mmdd = `${month}-${String(d).padStart(2, '0')}`;
           
           let cellValue = st.dayStatus[d];
           if (!cellValue) {
             if (dObj.getDay() === 0) {
               cellValue = 'Sun';
-            } else if (ACADEMIC_HOLIDAYS[mmdd]) {
+            } else if (dayHoliday?.isHoliday) {
               cellValue = 'H';
             } else if (logsByDay[d]) {
               cellValue = '-';
@@ -745,6 +748,7 @@ const TeacherDashboard = () => {
               data.cell.styles.fontStyle = 'bold';
             } else if (rawVal === 'P') {
               data.cell.styles.textColor = [5, 150, 105];
+              data.cell.styles.fillColor = [236, 253, 245];
               data.cell.styles.fontStyle = 'bold';
             } else if (rawVal === 'L') {
               data.cell.styles.textColor = [217, 119, 6];
@@ -776,18 +780,17 @@ const TeacherDashboard = () => {
         margin: { left: 14, right: 14, bottom: 28 }
       });
 
-      // --- SIGNATURE BLOCKS AT THE BOTTOM OF THE PAGE ---
+      // Signature Blocks
       const totalPages = doc.internal.getNumberOfPages();
       for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
 
-        // Position signatures on the final page
         if (i === totalPages) {
           const signY = pageHeight - 16;
           doc.setDrawColor(148, 163, 184);
           doc.setLineWidth(0.4);
 
-          // 1. Faculty Member Signature (Left)
+          // 1. Faculty
           doc.line(18, signY, 78, signY);
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(7.5);
@@ -798,7 +801,7 @@ const TeacherDashboard = () => {
           doc.setTextColor(100, 116, 139);
           doc.text(`Prof. ${storedUser?.name || 'Faculty Member'}`, 18, signY + 7.5);
 
-          // 2. HOD Verification (Center)
+          // 2. HOD
           const midX = (pageWidth / 2) - 30;
           doc.line(midX, signY, midX + 60, signY);
           doc.setFont('helvetica', 'bold');
@@ -810,7 +813,7 @@ const TeacherDashboard = () => {
           doc.setTextColor(100, 116, 139);
           doc.text("Department Seal & Sign", midX, signY + 7.5);
 
-          // 3. Principal Seal & Signature (Right)
+          // 3. Principal
           const rightX = pageWidth - 78;
           doc.line(rightX, signY, rightX + 60, signY);
           doc.setFont('helvetica', 'bold');
@@ -823,7 +826,6 @@ const TeacherDashboard = () => {
           doc.text("Success Degree College", rightX, signY + 7.5);
         }
 
-        // Page numbering
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(6.5);
         doc.setTextColor(148, 163, 184);
@@ -941,7 +943,7 @@ const TeacherDashboard = () => {
               className="flex items-center gap-2 px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-2xl text-xs font-bold transition-all cursor-pointer"
             >
               <Palmtree size={14} />
-              <span>Holidays</span>
+              <span>Holidays ({academicHolidays.length})</span>
             </button>
 
             {/* Detailed Monthly Report PDF Export */}
@@ -1211,7 +1213,7 @@ const TeacherDashboard = () => {
               )}
             </div>
 
-            {/* Condition A: Holiday Locked (Prompt to Unlock) */}
+            {/* Condition A: Holiday Locked */}
             {isHolidayLocked ? (
               <div className="py-14 px-6 rounded-3xl bg-linear-to-b from-amber-500/10 via-slate-950/40 to-slate-950/80 border border-amber-500/20 text-center flex flex-col items-center justify-center space-y-4 shadow-inner">
                 <div className="w-16 h-16 rounded-3xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-xl shadow-amber-500/10">
@@ -1317,7 +1319,6 @@ const TeacherDashboard = () => {
                             key={student._id} 
                             className="p-4 sm:px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-white/2 transition-colors"
                           >
-                            {/* Student Details */}
                             <div className="flex items-center gap-3.5">
                               <div className="w-10 h-10 rounded-xl bg-linear-to-br from-slate-800 to-slate-700 border border-white/10 flex items-center justify-center font-bold text-indigo-400 shadow-sm text-sm">
                                 {(student.fullName || student.name || 'S').charAt(0).toUpperCase()}
@@ -1339,7 +1340,6 @@ const TeacherDashboard = () => {
                               </div>
                             </div>
 
-                            {/* Status Buttons */}
                             <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10 gap-1 w-full sm:w-auto justify-center">
                               <button
                                 type="button"
@@ -1429,7 +1429,7 @@ const TeacherDashboard = () => {
           </div>
         )}
 
-        {/* MODAL: Annual Academic Holiday Calendar */}
+        {/* MODAL: Dynamic Academic Holiday Calendar from Database */}
         {isHolidayModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
             <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-2xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[85vh] flex flex-col">
@@ -1444,10 +1444,10 @@ const TeacherDashboard = () => {
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                       <span>Academic Holiday Schedule</span>
                       <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
-                        {Object.keys(ACADEMIC_HOLIDAYS).length} Gazetted Days
+                        {academicHolidays.length} Records
                       </span>
                     </h3>
-                    <p className="text-xs text-slate-400">Institutional & Karnataka State Gazetted non-instructional days.</p>
+                    <p className="text-xs text-slate-400">Institutional & Gazetted non-instructional days configured in system database.</p>
                   </div>
                 </div>
                 <button 
@@ -1459,38 +1459,60 @@ const TeacherDashboard = () => {
               </div>
 
               {/* Holiday Items Grid / List */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                {Object.entries(ACADEMIC_HOLIDAYS).map(([dateKey, holidayName]) => {
-                  const [mStr, dStr] = dateKey.split('-');
-                  const monthName = new Date(2026, parseInt(mStr, 10) - 1, parseInt(dStr, 10)).toLocaleString('default', { month: 'short' });
-                  const isCurrentDate = attendanceDate && attendanceDate.endsWith(dateKey);
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                {holidaysLoading ? (
+                  <div className="py-12 text-center text-xs text-slate-400 font-mono">
+                    Synchronizing holiday records...
+                  </div>
+                ) : academicHolidays.length === 0 ? (
+                  <div className="py-12 text-center text-slate-500 text-xs">
+                    No academic holidays currently scheduled in the portal.
+                  </div>
+                ) : (
+                  academicHolidays.map((holiday) => {
+                    const startStd = toStandardDateString(holiday.startDate);
+                    const endStd = toStandardDateString(holiday.endDate);
+                    const isSelectedDate = attendanceDate >= startStd && attendanceDate <= endStd;
 
-                  return (
-                    <div 
-                      key={dateKey}
-                      className={`p-3.5 rounded-2xl border flex items-center justify-between gap-4 transition-all ${
-                        isCurrentDate 
-                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-200 shadow-md shadow-amber-500/10' 
-                          : 'bg-slate-950/60 border-white/5 text-slate-300 hover:bg-slate-950/80 hover:border-white/10'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3.5">
-                        <div className="w-12 h-10 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center text-center font-bold">
-                          <span className="text-[9px] uppercase tracking-wider text-amber-400 leading-none">{monthName}</span>
-                          <span className="text-sm text-white font-mono leading-tight">{dStr}</span>
+                    const startFormatted = formatDisplayDate(startStd);
+                    const endFormatted = formatDisplayDate(endStd);
+                    const isSingleDay = startStd === endStd;
+
+                    const { month, day } = parseDateParts(startStd);
+                    const monthShort = new Date(2026, parseInt(month, 10) - 1, parseInt(day, 10)).toLocaleString('default', { month: 'short' });
+
+                    return (
+                      <div 
+                        key={holiday._id || `${startStd}-${holiday.title}`}
+                        className={`p-3.5 rounded-2xl border flex items-center justify-between gap-4 transition-all ${
+                          isSelectedDate 
+                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-200 shadow-md shadow-amber-500/10' 
+                            : 'bg-slate-950/60 border-white/5 text-slate-300 hover:bg-slate-950/80 hover:border-white/10'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-12 h-10 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center text-center font-bold">
+                            <span className="text-[9px] uppercase tracking-wider text-amber-400 leading-none">{monthShort}</span>
+                            <span className="text-sm text-white font-mono leading-tight">{day}</span>
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-sm text-white">{holiday.title}</h4>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {startFormatted}{!isSingleDay && ` to ${endFormatted}`}
+                            </span>
+                            {holiday.description && (
+                              <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">{holiday.description}</p>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-bold text-sm text-white">{holidayName}</h4>
-                          <span className="text-[10px] text-slate-400 font-mono">Date Code: {dateKey}</span>
-                        </div>
+
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20 font-medium whitespace-nowrap">
+                          {holiday.type || 'Off'}
+                        </span>
                       </div>
-
-                      <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20 font-medium">
-                        Institution Off
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               {/* Modal Footer */}

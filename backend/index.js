@@ -8,7 +8,7 @@ import teacherRoutes from "./routes/assignmentRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
 import adminRouter from "./routes/adminRoute.js";
-
+import holidayRoutes from "./routes/holidayRoutes.js"
 dotenv.config();
 const app = express();
 
@@ -36,6 +36,7 @@ app.use("/api/admin", adminRouter);
 app.use("/api/teacher", teacherRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/holidays",holidayRoutes)
 
 // Local development listener
 if (process.env.NODE_ENV !== "production") {

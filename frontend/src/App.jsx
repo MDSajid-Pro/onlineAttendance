@@ -12,6 +12,7 @@ import TeacherDashboard from './pages/TeacherDashboard';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import EmployeeList from './pages/EmployeeList';
+import ManageHolidays from './components/admin/ManageHolidays';
 
 const App = () => {
   const { token } = useAppContext();
@@ -52,6 +53,7 @@ const App = () => {
           <Route path="students" element={<Students />} />
           <Route path="add" element={<AddEmployee />} />
           <Route path="assign" element={<AssignStudents />} />
+          <Route path="holidays" element={<ManageHolidays />} />
         </Route>
 
         {/* Fallback Catch-All */}

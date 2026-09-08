@@ -10,7 +10,8 @@ import {
   Menu, 
   X, 
   LogOut, 
-  ShieldCheck
+  ShieldCheck,
+  CalendarDays // Added for holiday management
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -80,7 +81,6 @@ const AdminLayout = () => {
             </div>
           </div>
 
-          {/* Close button visible exclusively in mobile drawer */}
           <button 
             onClick={closeMenu}
             className="md:hidden p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors cursor-pointer"
@@ -134,6 +134,19 @@ const AdminLayout = () => {
               icon={<UserCheck size={18} />} 
               label="Course Allocation" 
               active={location.pathname === '/admin/assign'} 
+              onClick={closeMenu} 
+            />
+          </div>
+
+          {/* Schedule & Holidays Navigation */}
+          <div className="pt-4">
+            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Schedule & Planning</p>
+            
+            <NavItem 
+              to="/admin/holidays" 
+              icon={<CalendarDays size={18} />} 
+              label="Manage Holidays" 
+              active={location.pathname.startsWith('/admin/holidays')} 
               onClick={closeMenu} 
             />
           </div>
